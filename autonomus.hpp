@@ -5,6 +5,7 @@
 #include <queue>
 #include <fstream>
 #include <limits>
+#include <NAVI.hpp>
 
 using namespace vex;
 
@@ -96,5 +97,5 @@ void AIMODE(void){
 
 }
 void autonomous() {
-    hardauton();
+    NAVI(50,50);
 }

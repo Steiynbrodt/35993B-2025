@@ -10,13 +10,13 @@ brain Brain;
 competition Competition;
 controller Controller1 = controller(primary);
 digital_out Pneumatic1(Brain.ThreeWirePort.A);
-
-motor driveMotorRightOne = motor(PORT16, ratio18_1, false);   
+gps GPS17 = gps(PORT17, -80.00, 80.00, mm, -90);
+motor driveMotorRightOne = motor(PORT17, ratio18_1, false);   
 motor driveMotorLeftOne = motor(PORT1, ratio18_1, true);   
-motor driveMotorRightTwo = motor(PORT15, ratio18_1, false);
-motor driveMotorLeftTwo = motor(PORT3, ratio18_1, true); 
+motor driveMotorRightTwo = motor(PORT13, ratio18_1, false);
+motor driveMotorLeftTwo = motor(PORT9, ratio18_1, true); 
 motor driveMotorRightThree = motor(PORT14, ratio18_1, false);    
-motor driveMotorLeftThree = motor(PORT2, ratio18_1, true);
+motor driveMotorLeftThree = motor(PORT5, ratio18_1, true);
 
 motor_group RightDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree);
 motor_group LeftDrivetrain  = motor_group(driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
