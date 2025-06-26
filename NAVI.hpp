@@ -141,6 +141,7 @@ void driveTo(double targetXmm, double targetYmm) {
     double dx = targetXmm - currentX;
     double dy = targetYmm - currentY;
     double dist = sqrt(dx * dx + dy * dy);
+    
     if (dist <= tolerance){
       Brain.Screen.print("arrived");
       break;
@@ -155,18 +156,26 @@ void driveTo(double targetXmm, double targetYmm) {
     double currentHeading = normalize360(GPS17.heading());
     double angleError = shortestAngleDiff(angle, currentHeading);
 
-    if (fabs(angleError) < 3.0) {
-      angleError = 0.0;
-    }
+    if (fabs(angleError) < 3.0) angleError = 0.0;
 
-    double turnStrength = clamp(angleError * 0.1, -10.0, 10.0);
+    double turnStrength = 0.0;
+    if (fabs(angleError) > 3.0) {
+    turnStrength = clamp(angleError * 0.05, -10.0, 10.0);
+    }
     double leftSpeed = speed - turnStrength;
     double rightSpeed = speed + turnStrength;
 
     LeftDrivetrain.spin(forward, leftSpeed, percent);
     RightDrivetrain.spin(forward, rightSpeed, percent);
 
-    wait(50, msec);
+    
+    printf("[Drive] → Target: %.0f/%.0f mm | Pos: %.0f/%.0f mm | Δ%.0f mm | Heading %.1f°\n",
+       targetXmm, targetYmm,
+       currentX, currentY,
+       dist,
+       currentHeading);
+       wait(50, msec);
+    
   }
 
   FullDrivetrain.stop(brake);
@@ -274,15 +283,34 @@ void calculatePath() {
 }
 
 // === Folgen des Pfads mit Umrechnung der Koordinaten ===
-void followPath(){
+void followPath() {
+  double lastTargetX = 0;
+  double lastTargetY = 0;
+
   for (auto& point : pathWaypoints) {
     double absXmm = gridToMM(point.first);
     double absYmm = gridToMM(point.second);
+
+    lastTargetX = absXmm;
+    lastTargetY = absYmm;
+
     driveTo(absXmm, absYmm);
     wait(300, msec);
     updateStartPositionFromGPS();
   }
+
+  //  Dauerausgabe nach dem Pfad
+  while (true) {
+    printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n", lastTargetX, lastTargetY);
+    printf("[GPS ] Current:     X=%.2f mm, Y=%.2f mm, Heading=%.1f°\n",
+           GPS17.xPosition(mm),
+           GPS17.yPosition(mm),
+           GPS17.heading());
+    task::sleep(500);  // 0.5 Sekunden warten
+  }
 }
+
+
 void logGPSData() {
   if (!Brain.SDcard.isInserted()) {
     Brain.Screen.print("No SD card inserted!");
@@ -299,7 +327,7 @@ void logGPSData() {
       double heading = GPS17.heading();
 
       fprintf(logFile, "X: %.2f mm, Y: %.2f mm, Heading: %.2f deg\n", x, y, heading);
-
+      
       wait(500, msec);  // Wait 0.5 seconds
     }
 
@@ -311,9 +339,10 @@ void logGPSData() {
 }
 
 // === Hauptfunktion zur Navigation und Hindernisinitialisierung ===
-int NAVI(int targetX, int targetY) {
+ void NAVI(double targetXmm, double targetYmm) {
   // Zielkoordinaten begrenzen
-  
+  int targetX = toGridCoord(targetXmm);
+  int targetY = toGridCoord(targetYmm);
   targetX = clamp(targetX, -OFFSET, OFFSET);
   targetY = clamp(targetY, -OFFSET, OFFSET);
   goalX = targetX;
@@ -378,4 +407,6 @@ for (int i = 0; i < sizeof(obstacles)/sizeof(obstacles[0]); ++i) {
   while (true) {
     wait(500, msec);
   }
+  
+
 }
