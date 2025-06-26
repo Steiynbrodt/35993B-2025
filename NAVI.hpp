@@ -11,9 +11,10 @@ using namespace vex;
 
 // === Feld- und Rasterkonfiguration ===
 const double FIELD_SIZE_MM = 3600.0;
-const int GRID_SIZE = 37;
-const int OFFSET = 18;
+const int GRID_SIZE = 73;
+const int OFFSET = GRID_SIZE / 2; // bleibt kompatibel
 const double CELL_SIZE = FIELD_SIZE_MM / GRID_SIZE;
+
 
 int startX, startY;
 int goalX, goalY;
@@ -51,6 +52,17 @@ double gridToMM(int gridVal) {
 
 int toGridCoord(double mm) {
   return static_cast<int>(round(mm / CELL_SIZE));
+}
+void addObstacleWithMargin(int x, int y) {
+  for (int dx = -1; dx <= 1; dx++) {
+    for (int dy = -1; dy <= 1; dy++) {
+      int nx = x + dx;
+      int ny = y + dy;
+      if (nx >= -OFFSET && nx <= OFFSET && ny >= -OFFSET && ny <= OFFSET) {
+        walkable[ny + OFFSET][nx + OFFSET] = false;
+      }
+    }
+  }
 }
 
 void updateStartPositionFromGPS() {
@@ -101,12 +113,9 @@ void turnTo(int targetAngleDeg) {
   double direction = (error > 0) ? 1 : -1;
 
   while (fabs(error) > 10) {
-    driveMotorLeftOne.spin(forward, -5 * direction, percent);
-    driveMotorLeftTwo.spin(forward, -5 * direction, percent);
-    driveMotorLeftThree.spin(forward, -5 * direction, percent);
-    driveMotorRightOne.spin(forward, 5 * direction, percent);
-    driveMotorRightTwo.spin(forward, 5 * direction, percent);
-    driveMotorRightThree.spin(forward, 5 * direction, percent);
+    LeftDrivetrain.spin(forward,10.00,percent);
+    RightDrivetrain.spin(reverse,10.00,percent);
+    
 
     wait(50, msec);
 
@@ -115,17 +124,16 @@ void turnTo(int targetAngleDeg) {
     direction = (error > 0) ? 1 : -1;
   }
 
-  driveMotorLeftOne.stop(brake);
-  driveMotorLeftTwo.stop(brake);
-  driveMotorLeftThree.stop(brake);
-  driveMotorRightOne.stop(brake);
-  driveMotorRightTwo.stop(brake);
-  driveMotorRightThree.stop(brake);
+  
+  FullDrivetrain.stop(brake);
+  
+  
+  
 }
 
 void driveTo(double targetXmm, double targetYmm) {
-  const double tolerance = 20.0;
-  const double speed = 30.0;
+  const double tolerance = 30.0;
+  double speed = 10.0;
 
   while (true) {
     double currentX = GPS17.xPosition(mm);
@@ -133,34 +141,37 @@ void driveTo(double targetXmm, double targetYmm) {
     double dx = targetXmm - currentX;
     double dy = targetYmm - currentY;
     double dist = sqrt(dx * dx + dy * dy);
-    if (dist <= tolerance) break;
+    if (dist <= tolerance){
+      Brain.Screen.print("arrived");
+      break;
+    }
+
+    if (dist < 200) {
+      speed = 5.0; // langsam werden beim Ziel
+    }
 
     double angle = atan2(dy, dx) * 180.0 / M_PI;
     angle = normalize360(angle);
     double currentHeading = normalize360(GPS17.heading());
     double angleError = shortestAngleDiff(angle, currentHeading);
 
-    double turnStrength = clamp(angleError * 0.5, -20.0, 20.0);
+    if (fabs(angleError) < 3.0) {
+      angleError = 0.0;
+    }
+
+    double turnStrength = clamp(angleError * 0.1, -10.0, 10.0);
     double leftSpeed = speed - turnStrength;
     double rightSpeed = speed + turnStrength;
 
-    driveMotorLeftOne.spin(forward, leftSpeed, percent);
-    driveMotorLeftTwo.spin(forward, leftSpeed, percent);
-    driveMotorLeftThree.spin(forward, leftSpeed, percent);
-    driveMotorRightOne.spin(forward, rightSpeed, percent);
-    driveMotorRightTwo.spin(forward, rightSpeed, percent);
-    driveMotorRightThree.spin(forward, rightSpeed, percent);
+    LeftDrivetrain.spin(forward, leftSpeed, percent);
+    RightDrivetrain.spin(forward, rightSpeed, percent);
 
     wait(50, msec);
   }
 
-  driveMotorLeftOne.stop(brake);
-  driveMotorLeftTwo.stop(brake);
-  driveMotorLeftThree.stop(brake);
-  driveMotorRightOne.stop(brake);
-  driveMotorRightTwo.stop(brake);
-  driveMotorRightThree.stop(brake);
+  FullDrivetrain.stop(brake);
 }
+
 
 struct Node {
   int x, y;
@@ -263,7 +274,7 @@ void calculatePath() {
 }
 
 // === Folgen des Pfads mit Umrechnung der Koordinaten ===
-void followPath() {
+void followPath(){
   for (auto& point : pathWaypoints) {
     double absXmm = gridToMM(point.first);
     double absYmm = gridToMM(point.second);
@@ -272,12 +283,37 @@ void followPath() {
     updateStartPositionFromGPS();
   }
 }
+void logGPSData() {
+  if (!Brain.SDcard.isInserted()) {
+    Brain.Screen.print("No SD card inserted!");
+    return;
+  }
 
+  // Open file for appending
+  FILE* logFile = fopen("gps_log.txt", "a");
 
+  if (logFile) {
+    for (int i = 0; i < 100; i++) {  // Log 100 entries, then stop
+      double x = GPS17.xPosition(mm);
+      double y = GPS17.yPosition(mm);
+      double heading = GPS17.heading();
+
+      fprintf(logFile, "X: %.2f mm, Y: %.2f mm, Heading: %.2f deg\n", x, y, heading);
+
+      wait(500, msec);  // Wait 0.5 seconds
+    }
+
+    fclose(logFile);  // Important!
+    Brain.Screen.print("GPS data logged.");
+  } else {
+    Brain.Screen.print("Failed to open log file.");
+  }
+}
 
 // === Hauptfunktion zur Navigation und Hindernisinitialisierung ===
 int NAVI(int targetX, int targetY) {
   // Zielkoordinaten begrenzen
+  
   targetX = clamp(targetX, -OFFSET, OFFSET);
   targetY = clamp(targetY, -OFFSET, OFFSET);
   goalX = targetX;
@@ -295,20 +331,48 @@ int NAVI(int targetX, int targetY) {
   
 
   // Neue Hindernisse einfügen (Beispiel)
-  int obstacles[][2] = {
-    {-6, 0}, {6, 0}, {0, 6}, {0, -6},
-    {-7, 0}, {7, 0}, {0, -7}, {0, 7},
-    {-6, -1}, {6, 1}, {1, 6}, {1, -6},
-    {-5, 0}, {5, 0}, {0, 5}, {0, -5}
-  };
-  int obstacleCount = sizeof(obstacles) / sizeof(obstacles[0]);
-  for (int i = 0; i < obstacleCount; i++) {
-    addObstacle(obstacles[i][0], obstacles[i][1]);
-  }
+  // Alte Hindernisse skaliert + Margin angewendet
+int obstacles[][2] = {
+  // Top edge
+  {-36, 36}, {-34, 36}, {-32, 36}, {-30, 36}, {-28, 36}, {-26, 36}, {-24, 36}, {-22, 36},
+  {-20, 36}, {-18, 36}, {-16, 36}, {-14, 36}, {-12, 36}, {-10, 36}, {-8, 36}, {-6, 36},
+  {-4, 36}, {-2, 36}, {0, 36}, {2, 36}, {4, 36}, {6, 36}, {8, 36}, {10, 36}, {12, 36},
+  {14, 36}, {16, 36}, {18, 36}, {20, 36}, {22, 36}, {24, 36}, {26, 36}, {28, 36},
+  {30, 36}, {32, 36}, {34, 36}, {36, 36},
 
+  // Bottom edge
+  {-36, -36}, {-34, -36}, {-32, -36}, {-30, -36}, {-28, -36}, {-26, -36}, {-24, -36}, {-22, -36},
+  {-20, -36}, {-18, -36}, {-16, -36}, {-14, -36}, {-12, -36}, {-10, -36}, {-8, -36}, {-6, -36},
+  {-4, -36}, {-2, -36}, {0, -36}, {2, -36}, {4, -36}, {6, -36}, {8, -36}, {10, -36}, {12, -36},
+  {14, -36}, {16, -36}, {18, -36}, {20, -36}, {22, -36}, {24, -36}, {26, -36}, {28, -36},
+  {30, -36}, {32, -36}, {34, -36}, {36, -36},
+
+  // Left edge
+  {-36, -34}, {-36, -32}, {-36, -30}, {-36, -28}, {-36, -26}, {-36, -24}, {-36, -22},
+  {-36, -20}, {-36, -18}, {-36, -16}, {-36, -14}, {-36, -12}, {-36, -10}, {-36, -8},
+  {-36, -6}, {-36, -4}, {-36, -2}, {-36, 0}, {-36, 2}, {-36, 4}, {-36, 6}, {-36, 8},
+  {-36, 10}, {-36, 12}, {-36, 14}, {-36, 16}, {-36, 18}, {-36, 20}, {-36, 22}, {-36, 24},
+  {-36, 26}, {-36, 28}, {-36, 30}, {-36, 32}, {-36, 34},
+
+  // Right edge
+  {36, -34}, {36, -32}, {36, -30}, {36, -28}, {36, -26}, {36, -24}, {36, -22},
+  {36, -20}, {36, -18}, {36, -16}, {36, -14}, {36, -12}, {36, -10}, {36, -8},
+  {36, -6}, {36, -4}, {36, -2}, {36, 0}, {36, 2}, {36, 4}, {36, 6}, {36, 8},
+  {36, 10}, {36, 12}, {36, 14}, {36, 16}, {36, 18}, {36, 20}, {36, 22}, {36, 24},
+  {36, 26}, {36, 28}, {36, 30}, {36, 32}, {36, 34}
+};
+
+// Einfügen ins Grid mit Margin
+for (int i = 0; i < sizeof(obstacles)/sizeof(obstacles[0]); ++i) {
+  int x = obstacles[i][0];
+  int y = obstacles[i][1];
+  addObstacleWithMargin(x, y);
+};
+   
   updateStartPositionFromGPS();
   calculatePath();
-  printGrid();
+  //printGrid();
+  
   followPath();
 
   while (true) {

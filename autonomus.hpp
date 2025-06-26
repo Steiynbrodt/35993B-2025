@@ -97,5 +97,8 @@ void AIMODE(void){
 
 }
 void autonomous() {
-    NAVI(50,50);
+    
+    NAVI(toGridCoord(-500.00), toGridCoord(600.00));
+
+  
 }

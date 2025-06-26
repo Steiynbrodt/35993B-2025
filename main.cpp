@@ -1,15 +1,7 @@
-/*----------------------------------------------------------------------------*/
-/*                                                                            */
-/*    Module:       main.cpp                                                  */
-/*    Author:       steiynbrodt                                                      */
-/*    Created:      6/4/2025, 1:34:35 PM                                      */
-/*    Description:  V5 project                                                */
-/*                                                                            */
-/*----------------------------------------------------------------------------*/
-
 #include "vex.h"
 #include "drive.hpp"
 #include "autonomus.hpp"
+#include "test.hpp"
 using namespace vex;
 
 // A global instance of competition
@@ -28,7 +20,8 @@ using namespace vex;
 /*---------------------------------------------------------------------------*/
 
 void pre_auton(void) {
-
+ GPS17.calibrate();
+ logGPSData();
   // All activities that occur before the competition starts
   // Example: clearing encoders, setting servo positions, ...
 }
@@ -62,13 +55,12 @@ void pre_auton(void) {
 //
 int main() {
   // Set up callbacks for autonomous and driver control periods.
-  Competition.autonomous(autonomous);
-  Competition.drivercontrol(drivercontrol);
-  // Run the pre-autonomous function.
+  //test();
   pre_auton();
-
-  // Prevent main from exiting with an infinite loop.
-  while (true) {
-    wait(100, msec);
-  }
+  Competition.drivercontrol(drivercontrol);
+  Competition.autonomous(autonomous);
+  
+ 
+  
+  
 }
