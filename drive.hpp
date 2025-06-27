@@ -22,14 +22,18 @@ motor_group RightDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo
 motor_group LeftDrivetrain  = motor_group(driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
 motor_group FullDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree, driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
 bool DrivetrainNeedsToBeStopped_Controller1 = true;
-int rc_auto_loop_function_Controller1()
+
+
+#pragma endregion VEXcode Generated Robot Configuration
+
+void drivercontrol()
 {
+   
   
   while (true)
   {
-    
-    int drivetrainLeftSideSpeed = Controller1.Axis3.position() + Controller1.Axis1.position()/2;
-    int drivetrainRightSideSpeed = Controller1.Axis3.position() - Controller1.Axis1.position()/2;
+    double drivetrainLeftSideSpeed = Controller1.Axis3.position() - Controller1.Axis1.position()/2;
+    double drivetrainRightSideSpeed = Controller1.Axis3.position() +  Controller1.Axis1.position()/2;
 
     //if (abs(drivetrainLeftSideSpeed) < 5 && abs(drivetrainRightSideSpeed) < 5 && DrivetrainNeedsToBeStopped_Controller1) DrivetrainNeedsToBeStopped_Controller1 = false;
     //else DrivetrainNeedsToBeStopped_Controller1 = true;
@@ -44,16 +48,9 @@ int rc_auto_loop_function_Controller1()
 
     //RightDrivetrain.spin(forward, y - a, percent);
     //LeftDrivetrain.spin(forward, y + a, percent);
-    RightDrivetrain.spin(forward,drivetrainRightSideSpeed, percent);
-    LeftDrivetrain.spin(forward,drivetrainLeftSideSpeed, percent);
+    RightDrivetrain.spin(reverse,drivetrainRightSideSpeed, percent);
+    LeftDrivetrain.spin(reverse,drivetrainLeftSideSpeed, percent);
   }
-  return 0;
-}
-
-#pragma endregion VEXcode Generated Robot Configuration
-
-void drivercontrol()
-{
-   rc_auto_loop_function_Controller1();
-
+  
+  
 }

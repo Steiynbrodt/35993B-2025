@@ -2,7 +2,8 @@
 #include "vex.h"
 #include <cassert>
 #include <iostream>
- void drivetest(){
+ using namespace vex;
+  void drivetest(){
     LeftDrivetrain.spin(forward, 20, percent);
     RightDrivetrain.spin(forward, 20, percent);
     task::sleep(2000);

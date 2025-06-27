@@ -11,7 +11,7 @@ using namespace vex;
 
 // === Feld- und Rasterkonfiguration ===
 const double FIELD_SIZE_MM = 3600.0;
-const int GRID_SIZE = 73;
+const int GRID_SIZE = 72;
 const int OFFSET = GRID_SIZE / 2; // bleibt kompatibel
 const double CELL_SIZE = FIELD_SIZE_MM / GRID_SIZE;
 
@@ -19,8 +19,10 @@ const double CELL_SIZE = FIELD_SIZE_MM / GRID_SIZE;
 int startX, startY;
 int goalX, goalY;
 bool walkable[GRID_SIZE][GRID_SIZE];
-bool isPath[GRID_SIZE][GRID_SIZE] = { false };
-
+bool isPath[GRID_SIZE][GRID_SIZE] = {{false}};
+double clamp(double value, double minVal, double maxVal) {
+  return std::max(minVal, std::min(maxVal, value));
+}
 std::vector<std::pair<int, int>> pathWaypoints;
 std::vector<std::pair<int, int>> customObstacles;
 // === Hilfsfunktion zur Normalisierung von Sensorwerten (-180° bis 180° → 0° bis 360°) ===
@@ -51,7 +53,8 @@ double gridToMM(int gridVal) {
 }
 
 int toGridCoord(double mm) {
-  return static_cast<int>(round(mm / CELL_SIZE));
+  int coord = static_cast<int>(round(mm / CELL_SIZE));
+  return clamp(coord, -OFFSET, OFFSET);
 }
 void addObstacleWithMargin(int x, int y) {
   for (int dx = -1; dx <= 1; dx++) {
@@ -66,8 +69,14 @@ void addObstacleWithMargin(int x, int y) {
 }
 
 void updateStartPositionFromGPS() {
-  startX = toGridCoord(GPS17.xPosition(mm));
-  startY = toGridCoord(GPS17.yPosition(mm));
+  double gpsX = GPS17.xPosition(mm);
+  double gpsY = GPS17.yPosition(mm);
+  if (std::isnan(gpsX) || std::isnan(gpsY)) {
+    printf("[ERROR] Invalid GPS data");
+    return;
+  }
+  startX = clamp(toGridCoord(gpsX), -OFFSET, OFFSET);
+  startY = clamp(toGridCoord(gpsY), -OFFSET, OFFSET);
 }
 
 void printGrid() {
@@ -102,38 +111,16 @@ double shortestAngleDiff(double target, double current) {
   return diff;
 }
 
-double clamp(double value, double minVal, double maxVal) {
-  return std::max(minVal, std::min(maxVal, value));
-}
 
-void turnTo(int targetAngleDeg) {
-  targetAngleDeg = normalize360(targetAngleDeg);
-  double currentAngle = normalize360(GPS17.heading());
-  double error = shortestAngleDiff(targetAngleDeg, currentAngle);
-  double direction = (error > 0) ? 1 : -1;
 
-  while (fabs(error) > 10) {
-    LeftDrivetrain.spin(forward,10.00,percent);
-    RightDrivetrain.spin(reverse,10.00,percent);
-    
 
-    wait(50, msec);
-
-    currentAngle = normalize360(GPS17.heading());
-    error = shortestAngleDiff(targetAngleDeg, currentAngle);
-    direction = (error > 0) ? 1 : -1;
-  }
-
-  
-  FullDrivetrain.stop(brake);
-  
-  
-  
-}
 
 void driveTo(double targetXmm, double targetYmm) {
-  const double tolerance = 30.0;
-  double speed = 10.0;
+  const double tolerance = 60.0;         // Wann gilt Ziel als erreicht
+  double maxSpeed = 30.0;                // Startgeschwindigkeit
+  double speed = maxSpeed;
+  double lastDist = 9999.0;
+  int stuckCounter = 0;
 
   while (true) {
     double currentX = GPS17.xPosition(mm);
@@ -141,46 +128,66 @@ void driveTo(double targetXmm, double targetYmm) {
     double dx = targetXmm - currentX;
     double dy = targetYmm - currentY;
     double dist = sqrt(dx * dx + dy * dy);
-    
-    if (dist <= tolerance){
+
+    // === Ziel erreicht? ===
+    if (dist <= tolerance) {
       Brain.Screen.print("arrived");
+      FullDrivetrain.stop();
       break;
     }
 
-    if (dist < 200) {
-      speed = 5.0; // langsam werden beim Ziel
-    }
-
-    double angle = atan2(dy, dx) * 180.0 / M_PI;
-    angle = normalize360(angle);
+    // === Rückwärtsentscheidung ===
+    double angleToTarget = atan2(dy, dx) * 180.0 / M_PI;
+    angleToTarget = normalize360(angleToTarget);
     double currentHeading = normalize360(GPS17.heading());
-    double angleError = shortestAngleDiff(angle, currentHeading);
+    double angleError = shortestAngleDiff(angleToTarget, currentHeading);
 
-    if (fabs(angleError) < 3.0) angleError = 0.0;
+    bool reverse = fabs(angleError) > 90.0;  // rückwärts fahren ab 90°
 
-    double turnStrength = 0.0;
-    if (fabs(angleError) > 3.0) {
-    turnStrength = clamp(angleError * 0.05, -10.0, 10.0);
+    if (reverse) {
+      speed = -maxSpeed;  // Rückwärtsgeschwindigkeit
+      angleToTarget = normalize360(angleToTarget + 180);  // Neue Zielausrichtung
+      angleError = shortestAngleDiff(angleToTarget, currentHeading);
+    } else {
+      speed = maxSpeed; // Vorwärts
     }
+
+    // === Geschwindigkeit reduzieren beim Nähern ===
+    if (dist < 100.0) speed *= 0.5;
+    if (dist < 50.0)  speed *= 0.3;
+
+    // === Drehen und Korrektur ===
+    double turnStrength = clamp(angleError * 0.004, -20.0, 20.0);
     double leftSpeed = speed - turnStrength;
     double rightSpeed = speed + turnStrength;
 
     LeftDrivetrain.spin(forward, leftSpeed, percent);
     RightDrivetrain.spin(forward, rightSpeed, percent);
 
-    
-    printf("[Drive] → Target: %.0f/%.0f mm | Pos: %.0f/%.0f mm | Δ%.0f mm | Heading %.1f°\n",
-       targetXmm, targetYmm,
-       currentX, currentY,
-       dist,
-       currentHeading);
-       wait(50, msec);
+    // === Ausgabe & Stuck-Detection ===
+    printf("[Drive] → Target: %.0f/%.0f mm | Pos: %.0f/%.0f mm | Δ%.0f mm | Heading %.1f° | Mode: %s\n",
+           targetXmm, targetYmm,
+           currentX, currentY,
+           dist,
+           currentHeading,
+           reverse ? "REV" : "FWD");
+
+    if (fabs(dist - lastDist) < 1.5) stuckCounter++;
+    else stuckCounter = 0;
+    lastDist = dist;
+
+    if (stuckCounter > 15) {
+      printf("[WARN] Movement stalled. Aborting.\n");
+      break;  // Roboter steckt fest
+    }
+
+    wait(50, msec);
+
     
   }
 
-  FullDrivetrain.stop(brake);
+  
 }
-
 
 struct Node {
   int x, y;
@@ -405,7 +412,7 @@ for (int i = 0; i < sizeof(obstacles)/sizeof(obstacles[0]); ++i) {
   followPath();
 
   while (true) {
-    wait(500, msec);
+    wait(1000, msec);
   }
   
 
