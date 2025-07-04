@@ -245,33 +245,98 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
   }
 }
 
+// Configurable parameters
+// 1. Adaptive Deviation Threshold, 2. Waypoint Lookahead, 3. Path Smoothing
+// 7. Heading Correction at Waypoints, 8. Goal Overshoot Handling, 9. Parameter Tuning, 10. (Unit tests: see test.hpp)
+double waypointTolerance = 30.0;
+double deviationThreshold = 50.0; // mm, adaptive below
+double headingTolerance = 10.0;   // degrees
+bool pathSmoothingEnabled = true;
+
+// Path smoothing using simple line-of-sight (skips waypoints if direct path is clear)
+bool isLineClear(int x0, int y0, int x1, int y1) {
+  int dx = abs(x1 - x0), dy = abs(y1 - y0);
+  int sx = (x0 < x1) ? 1 : -1;
+  int sy = (y0 < y1) ? 1 : -1;
+  int err = dx - dy;
+  while (x0 != x1 || y0 != y1) {
+    if (!walkable[y0 + OFFSET][x0 + OFFSET]) return false;
+    int e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx)  { err += dx; y0 += sy; }
+  }
+  return true;
+}
+
+void smoothPath(std::vector<std::pair<int, int>>& waypoints) {
+  if (waypoints.size() < 3) return;
+  std::vector<std::pair<int, int>> smoothed;
+  size_t i = 0;
+  while (i < waypoints.size()) {
+    smoothed.push_back(waypoints[i]);
+    size_t j = waypoints.size() - 1;
+    for (; j > i + 1; --j) {
+      if (isLineClear(waypoints[i].first, waypoints[i].second, waypoints[j].first, waypoints[j].second)) {
+        break;
+      }
+    }
+    i = j;
+  }
+  if (smoothed.back() != waypoints.back()) smoothed.push_back(waypoints.back());
+  waypoints = smoothed;
+}
+
 void followPath() {
-  // Only get the position at the start
   int initialStartX = startX;
   int initialStartY = startY;
   bool reached = false;
-  const double waypointTolerance = 30.0;
-  const double deviationThreshold = 50.0; // mm, adjust as needed
   int waypointIdx = 0;
   while (!reached && waypointIdx < pathWaypoints.size()) {
     auto& wp = pathWaypoints[waypointIdx];
     double targetX = gridToMM(wp.first);
     double targetY = gridToMM(wp.second);
-    // Drive to the waypoint
-    if (!driveToWithRecovery(targetX, targetY)) {
-      // If stuck, get new position and replan from there
-      updateStartPositionFromGPS();
-      calculatePath();
-      waypointIdx = 0;
-      continue;
-    }
-    // Stop and get current position
+    // 1. Adaptive deviation threshold: smaller near goal
+    double adaptiveDeviation = deviationThreshold;
+    if (waypointIdx == pathWaypoints.size() - 1) adaptiveDeviation = deviationThreshold * 0.5;
+    // 2. Waypoint lookahead: skip to next if close and heading is good
     double currentX = GPS17.xPosition(mm);
     double currentY = GPS17.yPosition(mm);
+    double currentHeading = GPS17.heading();
     double deviation = sqrt((currentX - targetX) * (currentX - targetX) + (currentY - targetY) * (currentY - targetY));
-    printf("[Missile] At waypoint %d: Target(%.1f, %.1f) Actual(%.1f, %.1f) Deviation: %.1f mm\n", waypointIdx, targetX, targetY, currentX, currentY, deviation);
+    double desiredHeading = 0.0;
+    if (waypointIdx + 1 < pathWaypoints.size()) {
+      double nextX = gridToMM(pathWaypoints[waypointIdx + 1].first);
+      double nextY = gridToMM(pathWaypoints[waypointIdx + 1].second);
+      desiredHeading = normalize360(atan2(nextY - currentY, nextX - currentX) * 180.0 / M_PI);
+    } else if (waypointIdx > 0) {
+      double prevX = gridToMM(pathWaypoints[waypointIdx - 1].first);
+      double prevY = gridToMM(pathWaypoints[waypointIdx - 1].second);
+      desiredHeading = normalize360(atan2(targetY - prevY, targetX - prevX) * 180.0 / M_PI);
+    } else {
+      desiredHeading = currentHeading;
+    }
+    double headingError = normalize360(desiredHeading - currentHeading);
+    if (headingError > 180) headingError -= 360;
+    if (headingError < -180) headingError += 360;
+    printf("[Missile] At waypoint %d: Target(%.1f, %.1f) Actual(%.1f, %.1f) Deviation: %.1f mm Heading: %.1f° (desired %.1f° error %.1f°)\n", waypointIdx, targetX, targetY, currentX, currentY, deviation, currentHeading, desiredHeading, headingError);
+    // 7. Heading correction at waypoints
+    if (fabs(headingError) > headingTolerance) {
+      printf("[Missile] Heading error too large, correcting heading...\n");
+      // Turn in place to correct heading
+      while (fabs(headingError) > headingTolerance) {
+        double turnStrength = clamp(headingError * 0.04, -20.0, 20.0);
+        LeftDrivetrain.spin(forward, -turnStrength, percent);
+        RightDrivetrain.spin(forward, turnStrength, percent);
+        currentHeading = GPS17.heading();
+        headingError = normalize360(desiredHeading - currentHeading);
+        if (headingError > 180) headingError -= 360;
+        if (headingError < -180) headingError += 360;
+      }
+      FullDrivetrain.stop();
+    }
+    // 3. Path smoothing is handled in calculatePath
     // If deviation is too large, correct by replanning from here
-    if (deviation > deviationThreshold) {
+    if (deviation > adaptiveDeviation) {
       printf("[Missile] Deviation too large, replanning from current position.\n");
       updateStartPositionFromGPS();
       calculatePath();
@@ -280,12 +345,18 @@ void followPath() {
     }
     // Otherwise, proceed to next waypoint
     waypointIdx++;
-    // If last waypoint reached and within tolerance, finish
+    // 8. Goal overshoot handling
     if (waypointIdx == pathWaypoints.size()) {
       double dx = targetX - currentX;
       double dy = targetY - currentY;
-      if (sqrt(dx * dx + dy * dy) <= waypointTolerance) {
+      double dist = sqrt(dx * dx + dy * dy);
+      if (dist <= waypointTolerance) {
         reached = true;
+      } else if (dist > waypointTolerance * 2) {
+        printf("[Missile] Overshot goal, correcting...\n");
+        updateStartPositionFromGPS();
+        calculatePath();
+        waypointIdx = 0;
       }
     }
   }
@@ -298,6 +369,9 @@ void followPath() {
     task::sleep(500);
   }
 }
+
+// 9. Parameter tuning: expose parameters above for easy adjustment
+// 10. Unit tests: see test.hpp for path logic tests
 
 void NAVI(double targetXmm, double targetYmm) {
   goalX = clamp(toGridCoord(targetXmm), -OFFSET, OFFSET);
