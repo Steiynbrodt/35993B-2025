@@ -1,14 +1,16 @@
 // VEX Pfadnavigation mit A*, Stuck-Recovery, Live-Repathing, Logging, Hindernisrahmen und Rückwärtsfahrt + Liveausgabe
 #include "vex.h"
-#include <math.h>
+#include <cmath>
 #include <algorithm>
 #include <vector>
 #include <queue>
 #include <unordered_set>
 #include <fstream>
 #include <limits>
-
+#include <utility>
+#include <map>
 using namespace vex;
+
 
 const double FIELD_SIZE_MM = 3600.0;
 const int GRID_SIZE = 73;
@@ -69,7 +71,7 @@ int toGridCoord(double mm) {
 void updateStartPositionFromGPS() {
   double gpsX = GPS17.xPosition(mm);
   double gpsY = GPS17.yPosition(mm);
-  if (!std::isnan(gpsX) && !std::isnan(gpsY)) {
+  if (!isnan(gpsX) && !isnan(gpsY)) {
     startX = toGridCoord(gpsX);
     startY = toGridCoord(gpsY);
     task::sleep(100);
@@ -87,6 +89,29 @@ Node* nodes[GRID_SIZE][GRID_SIZE];
 
 int heuristic(int x1, int y1, int x2, int y2) {
   return 10 * (abs(x1 - x2) + abs(y1 - y2));
+}
+
+void simplifyPath(std::vector<std::pair<int, int>>& waypoints) {
+  if (waypoints.size() < 3) return;
+  std::vector<std::pair<int, int>> simplified;
+  simplified.push_back(waypoints[0]);
+  int dxPrev = waypoints[1].first - waypoints[0].first;
+  int dyPrev = waypoints[1].second - waypoints[0].second;
+  int lenPrev = std::max(abs(dxPrev), abs(dyPrev));
+  if (lenPrev != 0) { dxPrev /= lenPrev; dyPrev /= lenPrev; }
+  for (size_t i = 1; i < waypoints.size() - 1; ++i) {
+    int dx = waypoints[i+1].first - waypoints[i].first;
+    int dy = waypoints[i+1].second - waypoints[i].second;
+    int len = std::max(abs(dx), abs(dy));
+    if (len != 0) { dx /= len; dy /= len; }
+    if (dx != dxPrev || dy != dyPrev) {
+      simplified.push_back(waypoints[i]);
+      dxPrev = dx;
+      dyPrev = dy;
+    }
+  }
+  simplified.push_back(waypoints.back());
+  waypoints = simplified;
 }
 
 void calculatePath() {
@@ -123,6 +148,7 @@ void calculatePath() {
         p = p->parent;
       }
       std::reverse(pathWaypoints.begin(), pathWaypoints.end());
+      simplifyPath(pathWaypoints);
       break;
     }
 
@@ -220,18 +246,48 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
 }
 
 void followPath() {
-  while (true) {
-    for (auto& wp : pathWaypoints) {
-      double x = gridToMM(wp.first);
-      double y = gridToMM(wp.second);
-      if (!driveToWithRecovery(x, y)) {
-        updateStartPositionFromGPS();
-        calculatePath();
-        break;
-      }
+  // Only get the position at the start
+  int initialStartX = startX;
+  int initialStartY = startY;
+  bool reached = false;
+  const double waypointTolerance = 30.0;
+  const double deviationThreshold = 50.0; // mm, adjust as needed
+  int waypointIdx = 0;
+  while (!reached && waypointIdx < pathWaypoints.size()) {
+    auto& wp = pathWaypoints[waypointIdx];
+    double targetX = gridToMM(wp.first);
+    double targetY = gridToMM(wp.second);
+    // Drive to the waypoint
+    if (!driveToWithRecovery(targetX, targetY)) {
+      // If stuck, get new position and replan from there
       updateStartPositionFromGPS();
+      calculatePath();
+      waypointIdx = 0;
+      continue;
     }
-    break;
+    // Stop and get current position
+    double currentX = GPS17.xPosition(mm);
+    double currentY = GPS17.yPosition(mm);
+    double deviation = sqrt((currentX - targetX) * (currentX - targetX) + (currentY - targetY) * (currentY - targetY));
+    printf("[Missile] At waypoint %d: Target(%.1f, %.1f) Actual(%.1f, %.1f) Deviation: %.1f mm\n", waypointIdx, targetX, targetY, currentX, currentY, deviation);
+    // If deviation is too large, correct by replanning from here
+    if (deviation > deviationThreshold) {
+      printf("[Missile] Deviation too large, replanning from current position.\n");
+      updateStartPositionFromGPS();
+      calculatePath();
+      waypointIdx = 0;
+      continue;
+    }
+    // Otherwise, proceed to next waypoint
+    waypointIdx++;
+    // If last waypoint reached and within tolerance, finish
+    if (waypointIdx == pathWaypoints.size()) {
+      double dx = targetX - currentX;
+      double dy = targetY - currentY;
+      if (sqrt(dx * dx + dy * dy) <= waypointTolerance) {
+        reached = true;
+      }
+    }
   }
   while (true) {
     printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n", gridToMM(goalX), gridToMM(goalY));
@@ -258,6 +314,7 @@ void NAVI(double targetXmm, double targetYmm) {
     addObstacleWithMargin(36, i);
   }
 
+  // Only get the position at the start
   updateStartPositionFromGPS();
   calculatePath();
   followPath();
