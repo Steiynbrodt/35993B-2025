@@ -1,3 +1,4 @@
+
 // VEX Pfadnavigation mit A*, Stuck-Recovery, Live-Repathing, Logging, Hindernisrahmen und Rückwärtsfahrt + Liveausgabe
 #include "vex.h"
 #include <cmath>
@@ -9,7 +10,20 @@
 #include <limits>
 #include <utility>
 #include <map>
+#include <time.h>
+#include <string>
 using namespace vex;
+
+// --- Supervised Feedback Logging ---
+void logRunFeedback(bool success, double timeTaken, int replans, int stucks, double finalDeviation, int operatorRating, const std::string& notes) {
+    FILE* logFile = fopen("run_feedback.csv", "a");
+    if (logFile) {
+        long now = (long)::time(0);
+        fprintf(logFile, "%ld,%d,%.2f,%d,%d,%.2f,%d,%s\n",
+            now, success, timeTaken, replans, stucks, finalDeviation, operatorRating, notes.c_str());
+        fclose(logFile);
+    }
+}
 
 
 const double FIELD_SIZE_MM = 3600.0;
@@ -250,7 +264,7 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
 // 7. Heading Correction at Waypoints, 8. Goal Overshoot Handling, 9. Parameter Tuning, 10. (Unit tests: see test.hpp)
 double waypointTolerance = 30.0;
 double deviationThreshold = 50.0; // mm, adaptive below
-double headingTolerance = 10.0;   // degrees
+double headingTolerance = 5.0;   // degrees
 bool pathSmoothingEnabled = true;
 
 // Path smoothing using simple line-of-sight (skips waypoints if direct path is clear)
@@ -392,4 +406,15 @@ void NAVI(double targetXmm, double targetYmm) {
   updateStartPositionFromGPS();
   calculatePath();
   followPath();
+
+  // --- Feedback logging (replace with real values as needed) ---
+  bool success = true; // Set based on whether goal was reached
+  double timeTaken = 0; // Measure time for the run
+  int replans = 0;      // Count replans during followPath
+  int stucks = 0;       // Count stuck events
+  double finalDeviation = 0; // Compute at end
+  int operatorRating = 5;    // Prompt operator for rating (1-5)
+  std::string notes = "Auto log"; // Optionally prompt for notes
+
+  logRunFeedback(success, timeTaken, replans, stucks, finalDeviation, operatorRating, notes);
 }
