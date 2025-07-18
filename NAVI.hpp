@@ -12,28 +12,40 @@
 #include <map>
 #include <time.h>
 #include <string>
-using namespace vex;
-bool enableLearning = true; // Learning aktivieren oder deaktivieren
+double timeTaken; 
+ int replans;
+  int stucks;
+  bool enableLearning = true; // Learning aktivieren oder deaktivieren
 double initialHeadingOffset = 0.0;
 const double minTurn    = 0.2;   // Mindest-% zum Überwinden von Stiction
- const double maxTurn    = 10.0;  // Max-% für schnelles Drehen
+ const double maxTurn    = 5.0;  // Max-% für schnelles Drehen
+using namespace vex;
+ 
+
 double normalize360(double angle) {
   while (angle < 0) angle += 360;
   while (angle >= 360) angle -= 360;
   return angle;
 }
 
+double shortestAngleDiff(double from, double to) {
+  double diff = to - from;
+  while (diff > 180) diff -= 360;
+  while (diff < -180) diff += 360;
+  return diff;
+}
+
 void calibrateINSFromGPS() {
-  double gpsHeading = GPS17.heading();  // z.B. 132°
-  double insHeading = INS.heading(degrees); // z.B. -48°
-  if (gpsHeading < 0) gpsHeading += 360;
-  if (insHeading < 0) insHeading += 360;
-  initialHeadingOffset = gpsHeading - insHeading;
+  double gpsHeading = normalize360(GPS17.heading());
+  double insHeading = normalize360(INS.heading(degrees));
+  initialHeadingOffset = shortestAngleDiff(insHeading, gpsHeading);
+  printf("[Fusion] GPS=%.1f°, INS=%.1f°, Offset=%.1f°\n", gpsHeading, insHeading, initialHeadingOffset);
 }
 
 double getFusedHeading360() {
-  double h = INS.heading(degrees) + initialHeadingOffset;
-  return normalize360(h);
+  double h = INS.heading(degrees);
+  double fused = h + initialHeadingOffset;
+  return normalize360(fused);
 }
 
 
@@ -66,29 +78,25 @@ double taperOutput(double angleError, double maxOutput, double minOutput, double
   return scaled * (angleError < 0 ? -1 : 1);
 }
 // Liefert den kürzesten Drehrichtungs-Fehler zwischen zwei Winkeln (immer -180° bis +180°)
-double shortestAngleDiff(double from, double to) {
-  double diff = to - from;
-  while (diff > 180) diff -= 360;
-  while (diff < -180) diff += 360;
-  return diff;
-}
+
 void rotateToHeading(double targetHeadingDeg, double toleranceDeg = 5.0) {
-  const int maxAttempts = 40;
+  const int maxAttempts = 80;
   int attempts = 0;
 
-  // Fixiere Drehrichtung beim Start
   double currentHeading = getFusedHeading360();
-  double initialError = shortestAngleDiff(currentHeading, targetHeadingDeg);
-  int turnDir = (initialError >= 0) ? 1 : -1;
+  double error = shortestAngleDiff(currentHeading, targetHeadingDeg);
+  
+  // Initiale Drehrichtung festlegen
+   double strength = taperOutput(error, maxTurn, minTurn);
+
 
   while (++attempts <= maxAttempts) {
     currentHeading = getFusedHeading360();
-    double error = shortestAngleDiff(currentHeading, targetHeadingDeg);
+    error = shortestAngleDiff(currentHeading, targetHeadingDeg);
 
     if (fabs(error) <= toleranceDeg) break;
 
-    // Stärke nach Distanz tappen, keine Richtungswechsel mehr
-    double strength = taperOutput(fabs(error), maxTurn, minTurn) * turnDir;
+    double strength = taperOutput(error, maxTurn, minTurn);
 
     LeftDrivetrain.spin(reverse, strength, percent);
     RightDrivetrain.spin(forward, strength, percent);
@@ -100,7 +108,19 @@ void rotateToHeading(double targetHeadingDeg, double toleranceDeg = 5.0) {
   }
 
   FullDrivetrain.stop();
+  
 }
+
+double distancesqrt(double x1, double y1, double x2, double y2) {
+    return sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2));
+}
+
+
+double targetX;
+double targetY;
+double currentY;
+double currentX;
+
 
 const double FIELD_SIZE_MM = 3600.0;
 const int GRID_SIZE = 73;
@@ -119,27 +139,14 @@ std::vector<std::pair<int, int>> customObstacles;
 
 // Logs the current GPS position and heading to the SD card (gps_log.txt) if available.
 void logGPSData() {
-  if (!Brain.SDcard.isInserted()) {
-    Brain.Screen.print("No SD card inserted!");
-    return;
-  }
-
+  if (!Brain.SDcard.isInserted()) return;
   FILE* logFile = fopen("gps_log.txt", "a");
   if (!logFile) return;
-
-  for (size_t j = 0; j < 99999999; j++){
-
-   
-    double x = GPS17.xPosition(mm);
-    double y = GPS17.yPosition(mm);
-    double heading = getFusedHeading360();
-    fprintf(logFile, "%.2f,%.2f,%.2f,%.2f\n", Brain.timer(sec), x, y, heading);
-
-                // force flush buffer to SD (optional but safe)
-    task::sleep(100);            // log every 100ms = 10 Hz
-  }
-
-  fclose(logFile);               // 🔁 Note: unreachable here, but fine if refactored
+  double x = GPS17.xPosition(mm);
+  double y = GPS17.yPosition(mm);
+  double heading = getFusedHeading360();
+  fprintf(logFile, "%.2f,%.2f,%.2f,%.2f\n", Brain.timer(sec), x, y, heading);
+  fclose(logFile);
 }
 
 
@@ -288,6 +295,7 @@ void calculatePath() {
 
 // Drives to a target position (mm) with stuck detection and recovery. Returns true if target reached, false if stuck.
 bool driveToWithRecovery(double targetXmm, double targetYmm) {
+  
   const double tolerance = 30.0;
   const double maxSpeed = 10.0;
 
@@ -301,7 +309,7 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
     double dy = targetYmm - currentY;
     double dist = sqrt(dx * dx + dy * dy);
 
-    logGPSData();
+    
 
     if (dist <= tolerance) {
       FullDrivetrain.stop();
@@ -342,6 +350,7 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
       int cy = toGridCoord(currentY);
       addObstacleWithMargin(cx, cy);
       printf("[WARN] Movement stalled. Replanning...\n");
+      stuckCounter++;
       FullDrivetrain.stop();
       return false;
     }
@@ -390,10 +399,26 @@ void smoothPath(std::vector<std::pair<int, int>>& waypoints) {
   waypoints = smoothed;
 }
 
+thread gpsLoggerThread([](){
+  while(true) {
+    logGPSData();
+    task::sleep(100);
+     
+    
+    printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n", gridToMM(goalX), gridToMM(goalY));
+    printf("[GPS ] Current:     X=%.2f mm, Y=%.2f mm, Heading=%.1f°\n",GPS17.xPosition(mm),getFusedHeading360());
+    printf("[Fusion] GPS %.1f°, INS %.1f°, Offset %.1f°, Result %.1f°\n",GPS17.heading(degrees),INS.heading(), getFusedHeading360());
+
+    task::sleep(500);
+  
+  }
+});
+
 // Follows the current path, stopping at each direction-changing waypoint to check/correct position and heading.
 // Handles deviation, heading correction, and goal overshoot.
 void followPath() {
   
+
 
   double integral = 0.0;
   double lastError = 0.0;
@@ -405,6 +430,8 @@ void followPath() {
   int initialStartY = startY;
   bool reached = false;
   int waypointIdx = 0;
+  static double lastX = -9999, lastY = -9999;
+  static int noProgressCount = 0;
   
 
   while (!reached && waypointIdx < pathWaypoints.size()) {
@@ -417,6 +444,28 @@ void followPath() {
     // 2. Waypoint lookahead: skip to next if close and heading is good
     double currentX = GPS17.xPosition(mm);
     double currentY = GPS17.yPosition(mm);
+    double dxProg = currentX - lastX;
+  double dyProg = currentY - lastY;
+  if (sqrt(dxProg * dxProg + dyProg * dyProg) < 20.0) {
+    noProgressCount++;
+  } else {
+    noProgressCount = 0;
+  }
+  lastX = currentX;
+  lastY = currentY;
+
+if (noProgressCount >= 3) {
+    printf("[Missile] No progress → fallback to driveToWithRecovery()\n");
+    driveToWithRecovery(targetX, targetY);
+    return;
+}
+if (noProgressCount >= 3) {
+    printf("[Missile] No progress → fallback to driveToWithRecovery()\n");
+    bool recovered = driveToWithRecovery(targetX, targetY);
+    if (!recovered) stucks++;
+    return;  // ✔ Wichtig: Folge nicht weiter dem alten Pfad!
+}
+
     double currentHeading = getFusedHeading360();
     double deviation = sqrt((currentX - targetX) * (currentX - targetX) + (currentY - targetY) * (currentY - targetY));
     double desiredHeading = 0.0;
@@ -452,17 +501,26 @@ void followPath() {
   printf("[Missile] Heading error too large (%.1f°), correcting heading...\n", headingError);
   }
        
-
+static double lastReplanTime = 0;
+double now = Brain.timer(sec);
+if (now - lastReplanTime < 2.0) {
+    printf("[Missile] Skipping replan (rate limited)\n");
+    waypointIdx++;
+    continue;
+}
+lastReplanTime = now;
 // 3. Path smoothing is handled in calculatePath
     // If deviation is too large, correct by replanning from here
-    if (deviation > adaptiveDeviation) {
-      printf("[Missile] Deviation too large, replanning from current position.\n");
-      updateStartPositionFromGPS();
-      calculatePath();
-      waypointIdx = 0;
-      continue;
-    }
-    // Otherwise, proceed to next waypoint
+   if (deviation > adaptiveDeviation && fabs(headingError) < 15.0) {
+
+    printf("[Missile] Deviation too large, replanning from current position.\n");
+    updateStartPositionFromGPS();
+    calculatePath();
+    replans++;
+    waypointIdx = 0;
+    continue;
+}
+   
     waypointIdx++;
     // 8. Goal overshoot handling
     if (waypointIdx == pathWaypoints.size()) {
@@ -475,15 +533,12 @@ void followPath() {
         printf("[Missile] Overshot goal, correcting...\n");
         updateStartPositionFromGPS();
         calculatePath();
+        replans++; 
         waypointIdx = 0;
       }
     }
   }
-  while (true) {
-    printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n", gridToMM(goalX), gridToMM(goalY));
-    printf("[GPS ] Current:     X=%.2f mm, Y=%.2f mm, Heading=%.1f°\n",GPS17.xPosition(mm),getFusedHeading360());
-    task::sleep(500);
-  }
+ 
 }
 }
 // 9. Parameter tuning: expose parameters above for easy adjustment
@@ -530,10 +585,11 @@ void applyLearnedTuning() {
 
 // Main entry point: plans and follows a path to the target (mm), logs run feedback for supervised learning.
 void NAVI(double targetXmm, double targetYmm) {
-  
+  double startTime = Brain.timer(sec);
+
 
  INS.calibrate(0);
-task::sleep(2000);  // wichtig!
+task::sleep(3000);  // wichtig!
 calibrateINSFromGPS();
 
  
@@ -553,17 +609,22 @@ calibrateINSFromGPS();
 
   // Only get the position at the start
   updateStartPositionFromGPS();
+ 
   calculatePath();
   followPath();
+  double timeTaken = Brain.timer(sec) - startTime;
 
   // --- Feedback logging (replace with real values as needed) ---
-  bool success = true; // Set based on whether goal was reached
-  double timeTaken = 0; // Measure time for the run
-  int replans = 0;      // Count replans during followPath
-  int stucks = 0;       // Count stuck events
-  double finalDeviation = 0; // Compute at end
-  int operatorRating = 5;    // Prompt operator for rating (1-5)
-  std::string notes = "Auto log"; // Optionally prompt for notes
+  
 
-  logRunFeedback(success, timeTaken, replans, stucks, finalDeviation, operatorRating, notes);
+  double finalX = GPS17.xPosition(mm);
+  double finalY = GPS17.yPosition(mm);
+  double finalDeviation = sqrt(pow(finalX - targetXmm, 2) + pow(finalY - targetYmm, 2));
+  bool success = finalDeviation <= waypointTolerance;
+
+  int operatorRating = 5;
+  std::string notes = "Auto log";
+
+logRunFeedback(success, timeTaken, replans, stucks, finalDeviation, operatorRating, notes);
+
 }
