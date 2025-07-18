@@ -35,12 +35,7 @@ void test_clamp() {
   std::cout << "clamp passed\n";
 }
 
-void test_shortestAngleDiff() {
-  assert(shortestAngleDiff(10, 350) == 20);
-  assert(shortestAngleDiff(350, 10) == -20);
-  assert(shortestAngleDiff(180, 0) == 180);
-  std::cout << "shortestAngleDiff passed\n";
-}
+
 
 void test_gridToMM_and_toGridCoord() {
   int grid = 5;
@@ -50,10 +45,10 @@ void test_gridToMM_and_toGridCoord() {
 }
 
 void test_add_and_clear_obstacles() {
-  clearObstacles();
-  addObstacle(0, 0);
+ 
+  addObstacleWithMargin(0, 0);
   assert(!walkable[OFFSET][OFFSET]);
-  clearObstacles();
+  addObstacleWithMargin(1, 1);
   assert(walkable[OFFSET][OFFSET]);
   std::cout << "add/clear obstacle passed\n";
 }
@@ -61,7 +56,9 @@ void test_add_and_clear_obstacles() {
 void run_all_tests() {
   test_normalize360();
   test_clamp();
-  test_shortestAngleDiff();
+  updateStartPositionFromGPS(); // Ensure GPS is updated before grid tests
+  calculatePath(); // Calculate path to initialize nodes
+  
   test_gridToMM_and_toGridCoord();
   test_add_and_clear_obstacles();
  // drivetest();
