@@ -10,7 +10,7 @@ using namespace vex;
 brain Brain;
 competition Competition;
 controller Controller1 = controller(primary);
-gps GPS17 = gps(PORT17, -80.00, 80.00, mm, -90);
+gps GPS17 = gps(PORT17,-100.00, +30.00, mm, +90);
 motor driveMotorRightOne = motor(PORT17, ratio18_1, true); 
 inertial INS  = inertial(PORT12);
 motor driveMotorLeftOne = motor(PORT1, ratio18_1, false);   
