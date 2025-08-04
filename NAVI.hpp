@@ -1,5 +1,5 @@
 
-// VEX Pfadnavigation mit A*, Stuck-Recovery, Live-Repathing, Logging, Hindernisrahmen und Rückwärtsfahrt + Liveausgabe
+
 #include "vex.h"
 #include <cmath>
 #include <algorithm>
@@ -103,6 +103,7 @@ void rotateToHeading(double targetHeadingDeg, double toleranceDeg = 5.0) {
 
     printf("  ⟳ Rotating: curr=%.1f°, target=%.1f°, error=%.1f°, turn=%.1f%%\n",
            currentHeading, targetHeadingDeg, error, strength);
+    printf("[INS TEST] Raw: %.1f°, Fused: %.1f°\n", INS.heading(degrees), getFusedHeading360());
 
     wait(100, msec);
   }
@@ -588,9 +589,8 @@ void NAVI(double targetXmm, double targetYmm) {
   double startTime = Brain.timer(sec);
 
 
- INS.calibrate(0);
-task::sleep(3000);  // wichtig!
-calibrateINSFromGPS();
+ // wichtig!
+  calibrateINSFromGPS();
 
  
   goalX = clamp(toGridCoord(targetXmm), -OFFSET, OFFSET);
