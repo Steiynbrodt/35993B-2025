@@ -15,7 +15,7 @@
 double timeTaken; 
  int replans;
   int stucks;
-  bool enableLearning = false; // Learning Toggle
+  bool enableLearning = true; // Learning Toggle
 static double initialHeadingOffset;
 const double minTurn    = 3;  
  const double maxTurn    = 6; 
@@ -70,7 +70,51 @@ double getFusedHeading360() {
   double insH = INS.heading(degrees);
   return insH + initialHeadingOffset;
 }
+double yawOffset = 180;
 
+double INSS;
+
+double getYaw()
+{
+    INSS = INS.heading();
+    double yaw = INSS - 180 - yawOffset;
+    if (yaw < -180)
+    {
+        yaw += 360;
+    }
+    else if (yaw > 180)
+    {
+        yaw -= 360;
+    }
+    
+    return yaw;
+}
+void turnToYaw(double targetYaw)
+{
+    while (true)
+    {
+        double currentYaw = getYaw();
+        double error = targetYaw - currentYaw;
+        
+        // Normalize error to stay within -180 to 180 range
+        if (error > 180) error -= 360;
+        if (error < -180) error += 360;
+
+        if (abs(error) <= 1.5) break; // Stricter stop condition
+        
+        // Scale speed, min 5%, max 40%, stronger slowdown near target
+        double speed = std::max(6.0, 20.0 * (abs(error) / 90.0));
+        if (abs(error) < 10) speed = std::max(2.0, speed * 0.1); // Slow down more near target
+        
+        int direction = (error > 0) ? 1 : -1; // Determine turn direction
+        
+        RightDrivetrain.spin(forward, -speed * direction, percent);
+        LeftDrivetrain.spin(forward, speed * direction, percent);
+    }
+    
+    RightDrivetrain.stop();
+    LeftDrivetrain.stop();
+}
 // --- Supervised Feedback Logging ---
 // Logs the outcome and feedback of each autonomous run to run_feedback.csv for offline analysis and supervised learning.
 // Parameters:
@@ -90,7 +134,9 @@ void logRunFeedback(bool success, double timeTaken, int replans, int stucks, dou
         fclose(logFile);
     }
 }
-
+static const double kP         = 0.5;   // proportional gain (adjust as needed)
+static const double maxSpeed   = 50.0;  // maximum motor speed (%)
+static const double tolerance  = 1.0;   // how close is “close enough” (°)
 // Gibt eine gedämpfte Drehstärke zurück basierend auf Winkelabweichung
 double taperOutput(double angleError, double maxOutput, double minOutput, double taperRange = 90.0) {
   double absError = fabs(angleError);
@@ -100,39 +146,36 @@ double taperOutput(double angleError, double maxOutput, double minOutput, double
   return scaled * (angleError < 0 ? -1 : 1);
 }
 // Liefert den kürzesten Drehrichtungs-Fehler zwischen zwei Winkeln (immer -180° bis +180°)
+/*void rotateToHeading(double target) {
+  // Make sure target is 0…359.999
+  target = normalize360(target);
 
-static bool rotateToHeading(double targetDeg, double toleranceDeg = 5.0,int    maxLoops     = 80){
+  // Loop until within tolerance
+  while (true) {
+    double current = normalize360( INS.heading() );  
+    // INS.heading() returns 0–360° in degrees by default :contentReference[oaicite:0]{index=0} 
+    double error   = shortestAngleDiff(current, target);
     
+    // If we’re close enough, stop
+    if (fabs(error) <= tolerance) break;
 
-    printf("[Rotate/GPS] Turning to %.1f° ±%.1f°", targetDeg, toleranceDeg);
-    for (int i = 1; i <= maxLoops; ++i) {
-        double curr = getFusedHeading360();
-        double error = curr - targetDeg;
-        if (error > 180.0)  error -= 360.0;
-        if (error < -180.0) error += 360.0;
+    // Proportional control: command speed = kP * error, clamped to maxSpeed
+    double speed = kP * error;
+    speed = (speed > 0)
+              ? std::min(speed,  maxSpeed)
+              : std::max(speed, -maxSpeed);
 
-        printf("[Rotate/GPS] #%2d: curr=%.1f°, err=%+.1f°", i, curr, error);
-        if (fabs(error) <= toleranceDeg) {
-            FullDrivetrain.stop();
-            printf("[Rotate/GPS] Arrived at %.1f°", curr);
-            return true;
-        }
+    // Spin motors: left ← fwd when error>0, right → rev (and vice versa)
+    LeftDrivetrain.spin(  directionType::fwd,  speed, velocityUnits::pct );
+    RightDrivetrain.spin( directionType::rev,  speed, velocityUnits::pct );
 
-        double power = taperOutput(error, maxTurn, minTurn);
-        if (power > 0) {
-            LeftDrivetrain.spin (forward,  power, percent);
-            RightDrivetrain.spin(reverse,  power, percent);
-        } else {
-            LeftDrivetrain.spin (reverse, -power, percent);
-            RightDrivetrain.spin (forward, -power, percent);
-        }
-        task::sleep(50);
-    }
+    task::sleep(10);  // small delay to avoid hogging CPU
+  }
 
-    FullDrivetrain.stop();
-    printf("[Rotate/GPS] TIMEOUT at target=%.1f°", targetDeg);
-    return false;
-}
+  // Brake to hold heading
+  LeftDrivetrain.stop(  brakeType::brake );
+  RightDrivetrain.stop( brakeType::brake );
+}*/
 double distancesqrt(double x1, double y1, double x2, double y2) {
     return sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2));
 }
@@ -166,7 +209,7 @@ void logGPSData() {
   if (!logFile) return;
   double x = GPS17.xPosition(mm);
   double y = GPS17.yPosition(mm);
-  double heading = getFusedHeading360();
+  double heading = INS.heading(deg);
   fprintf(logFile, "%.2f,%.2f,%.2f,%.2f\n", Brain.timer(sec), x, y, heading);
   fclose(logFile);
 }
@@ -356,7 +399,7 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
       return true;
     }
 
-    double heading = getFusedHeading360();
+    double heading = INS.heading(deg);
     double angleToTarget = atan2(dy, dx) * 180.0 / M_PI;
     if (angleToTarget < 0) angleToTarget += 360.0;
 
@@ -368,7 +411,7 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
     if (reverse)
     fixedHeading = normalize360(fixedHeading + 180.0);
 
-    rotateToHeading(fixedHeading);
+    turnToYaw(fixedHeading);
     double driveSpeed = reverse ? -maxSpeed : maxSpeed;
     if (dist < 100.0) driveSpeed *= 0.5;
     if (dist < 50.0)  driveSpeed *= 0.3;
@@ -501,7 +544,7 @@ if (noProgressCount >= 3) {
     return;  // ✔ Wichtig: Folge nicht weiter dem alten Pfad!
 }
 
-    double currentHeading = getFusedHeading360();
+    double currentHeading = INS.heading();
     double deviation = sqrt((currentX - targetX) * (currentX - targetX) + (currentY - targetY) * (currentY - targetY));
     double desiredHeading = 0.0;
     if (waypointIdx + 1 < pathWaypoints.size()) {
@@ -520,7 +563,7 @@ if (noProgressCount >= 3) {
         // 7. Heading correction at waypoints
     {
       // Berechne aktuellen und gewünschten Heading in [0,360)
-      double currentHeading =getFusedHeading360();
+      double currentHeading =INS.heading();
       if (currentHeading < 0) currentHeading += 360.0;
       double desiredHeadingDeg = desiredHeading;  // aus deinem obigen Code
 
@@ -530,7 +573,7 @@ if (noProgressCount >= 3) {
      
   
   if (fabs(headingError) > headingTolerance) {
-  rotateToHeading(desiredHeading);
+  turnToYaw(desiredHeading);
   printf("[Missile] Heading error too large (%.1f°), correcting heading...\n", headingError);
   }
        
@@ -620,7 +663,7 @@ void applyLearnedTuning() {
 void NAVI(double targetXmm, double targetYmm) {
   double startTime = Brain.timer(sec);
 
-  calibrateINSFromGPS();
+  
  // wichtig!
   
  
