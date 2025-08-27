@@ -3,8 +3,8 @@
 #include <cmath>
 #include <stdbool.h>
 #include <math.h>
-#include "buttons.hpp"
-
+#include <buttons.hpp>
+#include <thread>
 #define FMT_HEADER_ONLY
 using namespace vex;
 
@@ -33,57 +33,8 @@ bool DrivetrainNeedsToBeStopped_Controller1 = true;
 #pragma endregion VEXcode Generated Robot Configuration
 
  
-void controlling(){
+void controlling(void){
 
-    void onButtonR1Press(void){
- 
-     while(Controller1.ButtonR1.pressing())
-  {
-    in4.setVelocity(100, percent);
-    in4.spin(forward);
-    vex::task::sleep(50);
-  }
-  in.stop();
-  vex::task::sleep(50);
- }
-
-// turning the Intake backwards
-void onButtonR2Press(void){
-  while(Controller1.ButtonR2.pressing())
-  {
-    in2.setVelocity(-100, percent);
-    in2.spin(forward);
-    vex::task::sleep(50);
-  }
-  in2.stop();
-  vex::task::sleep(50);
-}
-
-// Motor to use the Holer
-void onButtonL1Press()
-{
-  while(Controller1.ButtonL1.pressing()){
-    
-  }
- 
-}
-
-void stakeropen(void){
-
-  
-//holer.spin(forward,-100,percent);
-}
-
-void inntake(int intake ){
-  Intake.spin(forward,100,percent);
-  vex::task::sleep(intake);
-  Intake.stop();
-}
-    
-
-  
-while (true)
-  {
     double drivetrainLeftSideSpeed = Controller1.Axis3.position() - Controller1.Axis1.position()/2;
     double drivetrainRightSideSpeed = Controller1.Axis3.position() +  Controller1.Axis1.position()/2;
 
@@ -102,10 +53,19 @@ while (true)
     //LeftDrivetrain.spin(forward, y + a, percent);
     RightDrivetrain.spin(reverse,drivetrainRightSideSpeed, percent);
     LeftDrivetrain.spin(reverse,drivetrainLeftSideSpeed, percent);
-    while(true){
-      controlling();
+    while (condition)
+    {
+      /* code */
+      thread onButtonR1Press();
+      thread onButtonR2Press();
+      thread onButtonL1Press();
     }
-  }}
+    
+    
+    
+    
+   
+  }
   
   
 

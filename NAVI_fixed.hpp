@@ -115,6 +115,39 @@ void turnToYaw(double targetYaw)
     RightDrivetrain.stop();
     LeftDrivetrain.stop();
 }
+
+/*static bool rotateToHeading(double targetDeg, double toleranceDeg = 5.0,int    maxLoops     = 80){
+    
+
+    printf("[Rotate/GPS] Turning to %.1f° ±%.1f°", targetDeg, toleranceDeg);
+    for (int i = 1; i <= maxLoops; ++i) {
+        double curr = getFusedHeading360();
+        double error = curr - targetDeg;
+        if (error > 180.0)  error -= 360.0;
+        if (error < -180.0) error += 360.0;
+
+        printf("[Rotate/GPS] #%2d: curr=%.1f°, err=%+.1f°", i, curr, error);
+        if (fabs(error) <= toleranceDeg) {
+            FullDrivetrain.stop();
+            printf("[Rotate/GPS] Arrived at %.1f°", curr);
+            return true;
+        }
+
+        double power = taperOutput(error, maxTurn, minTurn);
+        if (power > 0) {
+            LeftDrivetrain.spin (forward,  power, percent);
+            RightDrivetrain.spin(reverse,  power, percent);
+        } else {
+            LeftDrivetrain.spin (reverse, -power, percent);
+            RightDrivetrain.spin (forward, -power, percent);
+        }
+        task::sleep(50);
+    }
+
+    FullDrivetrain.stop();
+    printf("[Rotate/GPS] TIMEOUT at target=%.1f°", targetDeg);
+    return false;
+}*/
 // --- Supervised Feedback Logging ---
 // Logs the outcome and feedback of each autonomous run to run_feedback.csv for offline analysis and supervised learning.
 // Parameters:
