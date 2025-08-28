@@ -1,66 +1,176 @@
-VEX Navigation System (NAVI) - Documentation & Explanation
-==========================================================
+# VEX Navigation System (NAVI) – Documentation & Explanation  
 
-Overview
---------
-This navigation system uses an A* pathfinding algorithm on a grid to guide a VEX robot from a start to a goal position. It supports:
-- Obstacle avoidance (with margin)
-- Path simplification (removing unnecessary waypoints)
-- Path smoothing (line-of-sight skipping)
-- Adaptive deviation correction (missile-like guidance)
-- Stuck detection and automatic replanning
-- Heading correction at waypoints
-- Goal overshoot handling
-- Parameter tuning for easy adjustment
+## Overview  
+The NAVI system provides autonomous navigation for a VEX robot using a grid-based **A\*** pathfinding algorithm combined with real-time corrective behaviors. It is designed for reliability in dynamic environments and includes:  
 
-Key Concepts
-------------
-- **Grid Representation:** The field is divided into a 73x73 grid. Each cell represents a region of the field.
-- **Waypoints:** The path is a sequence of grid cells (waypoints) from start to goal. Only direction-changing waypoints are kept after simplification.
-- **A* Algorithm:** Finds the shortest path from start to goal, considering obstacles.
-- **Path Simplification:** Removes intermediate waypoints that are collinear (including diagonals), so the robot only stops/turns at direction changes.
-- **Path Smoothing:** Further reduces waypoints by skipping over those that can be reached in a straight line without hitting obstacles.
-- **Missile Guidance Correction:** At each direction-changing waypoint, the robot stops, checks its actual position (using GPS), and compares it to the planned waypoint. If deviation is too large, it replans from its current position.
-- **Heading Correction:** At each waypoint, the robot checks its heading and corrects it if necessary before proceeding.
-- **Stuck Detection:** If the robot is not making progress, it marks its current cell as an obstacle and replans.
-- **Goal Overshoot Handling:** If the robot overshoots the goal, it replans to correct its position.
+- Obstacle avoidance with configurable safety margins  
+- Path simplification (remove redundant waypoints)  
+- Path smoothing (line-of-sight waypoint skipping)  
+- Adaptive deviation correction (missile-guidance style)  
+- Stuck detection and automatic replanning  
+- Heading correction at waypoints  
+- Goal overshoot handling  
+- Tunable parameters for flexible adjustment  
 
-Main Functions
---------------
-- `NAVI(double targetXmm, double targetYmm)`: Main entry point. Plans and follows a path to the target position in millimeters.
-- `calculatePath()`: Runs A* to find a path from the current start to the goal.
-- `simplifyPath()`: Removes unnecessary waypoints (keeps only direction changes).
-- `smoothPath()`: Further reduces waypoints using line-of-sight checks.
-- `followPath()`: Drives the robot along the path, stopping at each direction change to check/correct position and heading.
-- `driveToWithRecovery(double x, double y)`: Drives to a specific point, with stuck detection and recovery.
-- `updateStartPositionFromGPS()`: Updates the start position based on the current GPS reading.
+---
 
-Parameters (for tuning)
------------------------
-- `waypointTolerance`: How close the robot must get to a waypoint to consider it reached (mm).
-- `deviationThreshold`: Maximum allowed deviation from the path before replanning (mm).
-- `headingTolerance`: Maximum allowed heading error at waypoints (degrees).
-- `pathSmoothingEnabled`: Enable/disable path smoothing.
+## Key Concepts  
 
-Usage
------
-1. Call `NAVI(targetXmm, targetYmm)` with your desired goal position in millimeters.
-2. The robot will plan a path, follow it, and correct itself at each direction-changing waypoint.
-3. If the robot gets stuck or deviates too far, it will replan from its current position.
+- **Grid Representation**  
+  The field is modeled as a **73×73 grid**. Each grid cell represents a fixed square region of the field. Obstacles are mapped to cells with an additional margin for safety.  
 
-Missile Guidance Analogy
-------------------------
-The system is inspired by the "missile knows where it is" concept:
-- At each waypoint, the robot checks where it is vs. where it should be.
-- If the deviation is significant, it replans to correct its course.
-- The robot always knows where it was, where it is, and where it isn't, and uses this information to stay on track.
+- **Waypoints**  
+  A path is a sequence of grid cells leading from the start to the goal. After simplification, only direction-changing points remain, minimizing unnecessary stops.  
 
-Unit Testing
-------------
-- See `test.hpp` for unit tests of path logic.
+- **A\* Algorithm**  
+  The core pathfinding routine. It computes the shortest viable route between start and goal while respecting obstacles and margins.  
 
-Logging
--------
-- GPS data and key events are logged to the SD card for debugging and analysis.
+- **Path Simplification**  
+  Removes collinear waypoints (including diagonals). The robot only pauses/turns at meaningful direction changes.  
 
-For further details, see comments in `NAVI.hpp`.
+- **Path Smoothing**  
+  Further trims the path by skipping waypoints that are directly reachable in a straight line without hitting obstacles.  
+
+- **Missile Guidance Correction**  
+  At each direction-changing waypoint, the robot checks its **actual GPS position** against the planned waypoint. If deviation exceeds a threshold, it replans immediately.  
+
+- **Heading Correction**  
+  At waypoints, the robot ensures its heading aligns with the planned path. If outside tolerance, it performs a corrective turn before proceeding.  
+
+- **Stuck Detection**  
+  If the robot is not making measurable progress, it marks its current grid cell as blocked and recalculates the path.  
+
+- **Goal Overshoot Handling**  
+  If the robot drives past the target, it triggers a corrective replan to converge back to the goal.  
+
+---
+## A* Pathfinding Algorithm  
+
+A* is the core of NAVI’s pathfinding. It finds the shortest path from start to goal while considering obstacles.  
+
+### Cost Functions  
+- **g(n)** → exact cost from start to node *n*  
+- **h(n)** → heuristic estimate from node *n* to goal  
+- **f(n) = g(n) + h(n)** → total estimated cost  
+
+### Heuristic  
+A heuristic is an estimate of the distance remaining to the goal.  
+- **Manhattan distance** (no diagonals):  
+  `h(n) = |x_goal - x| + |y_goal - y|`  
+- **Euclidean distance** (diagonals allowed):  
+  `h(n) = sqrt((x_goal - x)^2 + (y_goal - y)^2)`  
+- **Diagonal distance** (8-way moves):  
+  `h(n) = max(|x_goal - x|, |y_goal - y|)`  
+
+In NAVI, **Euclidean distance** is typically used, since the robot can move diagonally.  
+
+### Algorithm Steps  
+1. Add the start node to the **open set**.  
+2. While open set not empty:  
+   - Pick the node with lowest `f(n)`  
+   - If it’s the goal → done  
+   - Otherwise, expand neighbors  
+   - Update `g`, `h`, and `f` for neighbors  
+   - Add neighbors to open set if new/better path found  
+3. Reconstruct path by following parent links  
+
+## Coordinate System  
+
+- **Grid Layout**:  
+  - The field is divided into a **73×73 grid**.  
+  - Each grid cell corresponds to ~49 mm.  
+
+- **Origin & Orientation**:  
+  - Grid origin `(0,0)` is the center of the field.  
+  - +X axis → right (east).  
+  - +Y axis → forward (north).  
+
+- **Conversions**:  
+  - `gridToMM(int cell)` → converts grid coordinates into millimeters.  
+  - `mmToGrid(double pos)` → converts millimeters back to grid coordinates.  
+
+---
+## Main Functions  
+
+- **`NAVI(double targetXmm, double targetYmm)`**  
+  Entry point. Plans and executes a path to the specified goal in millimeters.  
+
+- **`calculatePath()`**  
+  Runs A\* to compute a new path from the current start position to the goal.  
+
+- **`simplifyPath()`**  
+  Reduces the path by removing unnecessary collinear waypoints.  
+
+- **`smoothPath()`**  
+  Applies line-of-sight checks to further shorten the path.  
+
+- **`followPath()`**  
+  Executes the path, waypoint by waypoint. Includes position/heading checks, deviation monitoring, and replanning logic.  
+
+- **`driveToWithRecovery(double x, double y)`**  
+  Drives to a specified coordinate with built-in stall detection and fallback recovery behavior.  
+
+- **`updateStartPositionFromGPS()`**  
+  Resets the navigation start point based on the robot’s current GPS reading.  
+
+---
+
+## Parameters (Tuning)  
+
+- **`waypointTolerance`** – Minimum distance (mm) from a waypoint to consider it “reached.”  
+- **`deviationThreshold`** – Maximum deviation (mm) from the path before replanning is triggered.  
+- **`headingTolerance`** – Maximum heading error (°) tolerated at waypoints.  
+- **`pathSmoothingEnabled`** – Enable/disable path smoothing.  
+
+---
+
+## Usage  
+
+1. Call `NAVI(targetXmm, targetYmm)` with the desired goal position.  
+2. NAVI plans a path using A\*, simplifies/smooths it, and begins execution.  
+3. The robot corrects heading at waypoints, checks position, and replans if necessary.  
+4. If the robot stalls or overshoots, NAVI automatically recalculates from the current position.  
+
+---
+
+## Missile Guidance Analogy  
+
+NAVI borrows from the “missile knows where it is” principle:  
+
+- The robot always compares **where it is** vs. **where it should be**.  
+- Significant deviations trigger replanning to realign with the intended course.  
+- It continuously updates based on past, present, and projected state to stay on track.  
+
+---
+
+## Testing  
+
+- Unit tests for pathfinding and logic are provided in **`test.hpp`**.  
+
+---
+
+## Logging  
+
+- GPS data, path events, and correction actions are logged to the SD card.  
+- Logs support debugging, performance analysis, and tuning.  
+
+---
+
+## Flowchart  
+
+The following diagram illustrates the NAVI cycle:  
+
+![NAVI Flowchart](flowchart.png)  
+
+**Flow:**  
+- Start → Calculate Path (A*) → Simplify Path → Smooth Path → Follow Path  
+- At each waypoint: check deviation & heading  
+  - If deviation too large → Replan  
+  - If stuck → Replan  
+  - If goal reached → Stop  
+
+---
+
+## Further Details  
+
+- See inline comments in **`NAVI.hpp`** for detailed explanations of implementation and parameter usage.  
