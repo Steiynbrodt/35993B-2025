@@ -1,5 +1,6 @@
 
 
+
 #include "vex.h"
 #include <cmath>
 #include <algorithm>
@@ -42,34 +43,26 @@ double shortestAngleDiff(double from, double to) {
  * and stores it in initialHeadingOffset.
  */
 void calibrateINSFromGPS() {
-  // 1) Read raw headings
-  
-  static double gpsH = normalize360(GPS17.heading(degrees));     // GPS in [–180,180] or [0,360]
-  static double insH = INS.heading(degrees);       // INS in [0,360)
-  
-  // 2) Compute the signed offset: how much to add to INS to hit GPS
-  //    shortestAngleDiff(from,to) returns (to–from) in [–180,180]
-  auto shortestAngleDiff = [&](double from, double to) {
-    double d = to - from;
-    if (d > 180.0)  d -= 360.0;
-    if (d < -180.0) d += 360.0;
-    return d;
-  };
-  initialHeadingOffset = gpsH;
-  
-  // 3) Diagnostic print
-  double fusedH = INS.heading(degrees) + initialHeadingOffset;
-  printf("[Calib] GPS=%.1f°, INS=%.1f°, Offset=%.1f° → Fused=%.1f°\n",gpsH, insH, initialHeadingOffset, fusedH);
+  // normalize everything to [0,360)
+  double gpsH = normalize360(GPS17.heading(degrees));
+  double insH = normalize360(INS.heading(degrees));
+
+  // offset = (gps - ins) wrapped to [-180,180]
+  initialHeadingOffset = shortestAngleDiff(insH, gpsH);
+
+  double fusedH = normalize360(insH + initialHeadingOffset);
+  printf("[Calib] GPS=%.1f°, INS=%.1f°, Offset=%.1f° → Fused=%.1f°\n",
+         gpsH, insH, initialHeadingOffset, fusedH);
 }
 
-/**
+// Always return fused heading in [0,360)
+double getFusedHeading360() {
+  return normalize360(INS.heading(degrees) + initialHeadingOffset);
+}/*
  * Returns the “fused” heading in [0,360):
  *   INS.heading + the offset you computed at startup.
  */
-double getFusedHeading360() {
-  double insH = INS.heading(degrees);
-  return insH + initialHeadingOffset;
-}
+
 double yawOffset = 180;
 
 double INSS;
@@ -89,32 +82,40 @@ double getYaw()
     
     return yaw;
 }
-void turnToYaw(double targetYaw)
-{
-    while (true)
-    {
-        double currentYaw = getYaw();
-        double error = targetYaw - currentYaw;
-        
-        // Normalize error to stay within -180 to 180 range
-        if (error > 180) error -= 360;
-        if (error < -180) error += 360;
+void turnToYaw(double targetYaw) {
+  // normalize desired yaw to [0,360)
+  targetYaw = normalize360(targetYaw);
 
-        if (abs(error) <= 1.5) break; // Stricter stop condition
-        
-        // Scale speed, min 5%, max 40%, stronger slowdown near target
-        double speed = std::max(6.0, 20.0 * (abs(error) / 90.0));
-        if (abs(error) < 10) speed = std::max(2.0, speed * 0.1); // Slow down more near target
-        
-        int direction = (error > 0) ? 1 : -1; // Determine turn direction
-        
-        RightDrivetrain.spin(forward, -speed * direction, percent);
-        LeftDrivetrain.spin(forward, speed * direction, percent);
-    }
-    
-    RightDrivetrain.stop();
-    LeftDrivetrain.stop();
+  const double tolDeg = 1.5;
+  const int dt_ms = 15;
+  const int timeout_ms = 2500;
+  int elapsed = 0;
+
+  while (true) {
+    // use fused heading so the offset applies everywhere
+    double current = getFusedHeading360();
+    double err = shortestAngleDiff(current, targetYaw);
+
+    if (fabs(err) <= tolDeg) break;
+
+    // smooth, bounded turn power
+    double speed = std::max(6.0, 20.0 * (fabs(err) / 90.0));
+    if (fabs(err) < 10.0) speed = std::max(2.0, speed * 0.1);
+
+    int dir = (err > 0) ? 1 : -1;
+    LeftDrivetrain.spin(forward,  speed * dir, percent);
+    RightDrivetrain.spin(forward, -speed * dir, percent);
+
+    wait(dt_ms, msec);
+    elapsed += dt_ms;
+    if (elapsed >= timeout_ms) break;  // fail-safe: don't block forever
+  }
+
+  LeftDrivetrain.stop();
+  RightDrivetrain.stop();
 }
+
+
 
 /*static bool rotateToHeading(double targetDeg, double toleranceDeg = 5.0,int    maxLoops     = 80){
     
@@ -432,17 +433,15 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
       return true;
     }
 
-    double heading = INS.heading(deg);
+    double heading = getFusedHeading360();
     double angleToTarget = atan2(dy, dx) * 180.0 / M_PI;
     if (angleToTarget < 0) angleToTarget += 360.0;
 
     double angleError = shortestAngleDiff(heading, angleToTarget);
     bool reverse = fabs(angleError) > 90.0;
-
-    
     double fixedHeading = angleToTarget;
-    if (reverse)
-    fixedHeading = normalize360(fixedHeading + 180.0);
+    if (reverse) fixedHeading = normalize360(fixedHeading + 180.0);
+    turnToYaw(fixedHeading);
 
     turnToYaw(fixedHeading);
     double driveSpeed = reverse ? -maxSpeed : maxSpeed;
@@ -518,137 +517,162 @@ thread gpsLoggerThread([](){
   while(true) {
     logGPSData();
     task::sleep(100);
-     
-    
-    printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n", gridToMM(goalX), gridToMM(goalY));
-    printf("[GPS ] Current:     X=%.2f mm, Y=%.2f mm, Heading=%.1f°\n",GPS17.xPosition(mm),getFusedHeading360());
-    printf("[Fusion] GPS %.1f°, INS %.1f°, Offset %.1f°, Result %.1f°\n",GPS17.heading(degrees),INS.heading(), getFusedHeading360());
+
+    printf("[Path] Last target: X=%.2f mm, Y=%.2f mm\n",
+           gridToMM(goalX), gridToMM(goalY));
+
+    printf("[GPS ] Current: X=%.2f mm, Y=%.2f mm, Heading=%.1f°\n",
+           GPS17.xPosition(mm), GPS17.yPosition(mm), getFusedHeading360());
+
+    printf("[Fusion] GPS %.1f°, INS %.1f°, Offset %.1f°, Result %.1f°\n",
+           normalize360(GPS17.heading(degrees)),
+           normalize360(INS.heading(degrees)),
+           initialHeadingOffset,
+           getFusedHeading360());
 
     task::sleep(500);
-  
   }
 });
 
 // Follows the current path, stopping at each direction-changing waypoint to check/correct position and heading.
 // Handles deviation, heading correction, and goal overshoot.
 void followPath() {
-  
-
-
-  double integral = 0.0;
-  double lastError = 0.0;
-  double currentHeading;
-  double headingError;
-  double integralLimit = 100.0;
-
-  int initialStartX = startX;
-  int initialStartY = startY;
-  bool reached = false;
-  int waypointIdx = 0;
-  static double lastX = -9999, lastY = -9999;
+  // --- persistent helpers for rate limiting & progress ---
+  static double lastReplanTime = 0.0;
+  static double lastX = -9999.0, lastY = -9999.0;
   static int noProgressCount = 0;
-  
+
+  bool reached = false;
+  size_t waypointIdx = 0;
+
+  if (pathWaypoints.empty()) {
+    printf("[Follow] No path to follow.\n");
+    return;
+  }
+
+  printf("[Follow] Starting; waypoints=%zu\n", pathWaypoints.size());
 
   while (!reached && waypointIdx < pathWaypoints.size()) {
-    auto& wp = pathWaypoints[waypointIdx];
-    double targetX = gridToMM(wp.first);
-    double targetY = gridToMM(wp.second);
-    // 1. Adaptive deviation threshold: smaller near goal
-    double adaptiveDeviation = deviationThreshold;
-    if (waypointIdx == pathWaypoints.size() - 1) adaptiveDeviation = deviationThreshold * 0.5;
-    // 2. Waypoint lookahead: skip to next if close and heading is good
-    double currentX = GPS17.xPosition(mm);
-    double currentY = GPS17.yPosition(mm);
-    double dxProg = currentX - lastX;
-  double dyProg = currentY - lastY;
-  if (sqrt(dxProg * dxProg + dyProg * dyProg) < 20.0) {
-    noProgressCount++;
-  } else {
-    noProgressCount = 0;
-  }
-  lastX = currentX;
-  lastY = currentY;
+    // --- 0) Targets & pose ---
+    const double targetX = gridToMM(pathWaypoints[waypointIdx].first);
+    const double targetY = gridToMM(pathWaypoints[waypointIdx].second);
+    const double currentX = GPS17.xPosition(mm);
+    const double currentY = GPS17.yPosition(mm);
 
-
-if (noProgressCount >= 3) {
-    printf("[Missile] No progress → fallback to driveToWithRecovery()\n");
-    bool recovered = driveToWithRecovery(targetX, targetY);
-    if (!recovered) stucks++;
-    return;  // ✔ Wichtig: Folge nicht weiter dem alten Pfad!
-}
-
-    double currentHeading = INS.heading();
-    double deviation = sqrt((currentX - targetX) * (currentX - targetX) + (currentY - targetY) * (currentY - targetY));
-    double desiredHeading = 0.0;
-    if (waypointIdx + 1 < pathWaypoints.size()) {
-      double nextX = gridToMM(pathWaypoints[waypointIdx + 1].first);
-      double nextY = gridToMM(pathWaypoints[waypointIdx + 1].second);
-      desiredHeading = normalize360(atan2(nextY - currentY, nextX - currentX) * 180.0 / M_PI);
-    } else if (waypointIdx > 0) {
-      double prevX = gridToMM(pathWaypoints[waypointIdx - 1].first);
-      double prevY = gridToMM(pathWaypoints[waypointIdx - 1].second);
-      desiredHeading = normalize360(atan2(targetY - prevY, targetX - prevX) * 180.0 / M_PI);
-    } else {
-      desiredHeading = currentHeading;
-    }
-    double headingError = shortestAngleDiff(currentHeading, desiredHeading);
-    printf("[Missile] At waypoint %d: Target(%.1f, %.1f) Actual(%.1f, %.1f) Deviation: %.1f mm Heading: %.1f° (desired %.1f° error %.1f°)\n", waypointIdx, targetX, targetY, currentX, currentY, deviation, currentHeading, desiredHeading, headingError);
-        // 7. Heading correction at waypoints
-    {
-      // Berechne aktuellen und gewünschten Heading in [0,360)
-      double currentHeading =INS.heading();
-      if (currentHeading < 0) currentHeading += 360.0;
-      double desiredHeadingDeg = desiredHeading;  // aus deinem obigen Code
-
-      // Initialen Fehler im Bereich -180…+180 berechnen
-      
-
-     
-  
-  if (fabs(headingError) > headingTolerance) {
-  turnToYaw(desiredHeading);
-  printf("[Missile] Heading error too large (%.1f°), correcting heading...\n", headingError);
-  }
-       
-static double lastReplanTime = 0;
-double now = Brain.timer(sec);
-if (now - lastReplanTime < 2.0) {
-    printf("[Missile] Skipping replan (rate limited)\n");
-    waypointIdx++;
-    continue;
-}
-lastReplanTime = now;
-// 3. Path smoothing is handled in calculatePath
-    // If deviation is too large, correct by replanning from here
-   if (deviation > adaptiveDeviation && fabs(headingError) < 15.0) {
-
-    printf("[Missile] Deviation too large, replanning from current position.\n");
-    updateStartPositionFromGPS();
-    calculatePath();
-    replans++;
-    waypointIdx = 0;
-    continue;
-}
-   
-    waypointIdx++;
-    // 8. Goal overshoot handling
-    if (waypointIdx == pathWaypoints.size()) {
-      double dx = targetX - currentX;
-      double dy = targetY - currentY;
-      double dist = sqrt(dx * dx + dy * dy);
-      if (dist <= waypointTolerance) {
-        reached = true;
-      } else if (dist > waypointTolerance * 2) {
-        printf("[Missile] Overshot goal, correcting...\n");
-        updateStartPositionFromGPS();
-        calculatePath();
-        replans++; 
-        waypointIdx = 0;
+    // --- 1) Progress check (stall detection) ---
+    if (lastX > -9000.0 && lastY > -9000.0) {
+      const double dxProg = currentX - lastX;
+      const double dyProg = currentY - lastY;
+      if (hypot(dxProg, dyProg) < 20.0) {
+        noProgressCount++;
+      } else {
+        noProgressCount = 0;
       }
     }
+    lastX = currentX;
+    lastY = currentY;
+
+    if (noProgressCount >= 3) {
+      printf("[Follow] No progress (%d) → driveToWithRecovery()\n", noProgressCount);
+      LeftDrivetrain.stop();
+      RightDrivetrain.stop();
+
+      const bool recovered = driveToWithRecovery(targetX, targetY);
+      if (!recovered) {
+        stucks++;
+        // Mark obstacle (assumed inside recovery), re-seed from GPS, and REPLAN
+        updateStartPositionFromGPS();
+        calculatePath();
+        replans++;
+        waypointIdx = 0;
+        noProgressCount = 0;
+        printf("[Follow] Recovery failed → replanned path with %zu waypoints\n", pathWaypoints.size());
+        continue;  // follow the NEW path
+      } else {
+        noProgressCount = 0;
+      }
+    }
+
+    // --- 2) Distance to current waypoint ---
+    const double dx = targetX - currentX;
+    const double dy = targetY - currentY;
+    const double deviation = hypot(dx, dy);
+
+    // --- 3) Adaptive deviation threshold (tighter at final WP) ---
+    double adaptiveDeviation = deviationThreshold;
+    if (waypointIdx == pathWaypoints.size() - 1) {
+      adaptiveDeviation *= 0.5;
+    }
+
+    // --- 4) Desired heading to this waypoint ---
+    double desiredHeading = atan2(dy, dx) * 180.0 / M_PI;
+    if (desiredHeading < 0) desiredHeading += 360.0;
+
+    // Use fused heading consistently
+    double currentHeading = getFusedHeading360();
+    double headingError = shortestAngleDiff(currentHeading, desiredHeading);
+
+    printf("[Follow] WP %zu  Target(%.1f,%.1f)  Pos(%.1f,%.1f)  Dev=%.1fmm  Head=%.1f°→%.1f°  Err=%.1f°\n",
+           waypointIdx, targetX, targetY, currentX, currentY, deviation,
+           currentHeading, desiredHeading, headingError);
+
+    // --- 5) Heading correction if too large (cooperative turn) ---
+    if (fabs(headingError) > headingTolerance) {
+      turnToYaw(desiredHeading);               // must be the cooperative version
+      currentHeading = getFusedHeading360();   // refresh after turn
+      headingError = shortestAngleDiff(currentHeading, desiredHeading);
+      printf("[Follow] Corrected heading → now err=%.1f°\n", headingError);
+    }
+
+    // --- 6) Replan if far off-path (rate-limited) ---
+    const double now = Brain.timer(sec);
+    if (deviation > adaptiveDeviation && fabs(headingError) < 15.0) {
+      if (now - lastReplanTime < 2.0) {
+        printf("[Follow] Replan wanted but rate-limited (%.2fs)\n", now - lastReplanTime);
+        // IMPORTANT: do NOT advance waypoint here; just wait a cycle
+      } else {
+        lastReplanTime = now;
+        LeftDrivetrain.stop();
+        RightDrivetrain.stop();
+        updateStartPositionFromGPS();
+        calculatePath();
+        replans++;
+        waypointIdx = 0;
+        printf("[Follow] Deviation too large → replanned path with %zu waypoints\n", pathWaypoints.size());
+        continue;
+      }
+    }
+
+    // --- 7) Waypoint advancement (only if close enough) ---
+    if (deviation <= waypointTolerance) {
+      printf("[Follow] Reached WP %zu (%.1f, %.1f)  dist=%.1fmm\n",
+             waypointIdx, targetX, targetY, deviation);
+      waypointIdx++;
+      continue;
+    }
+
+    // --- 8) End-state handling when last WP is "near but not quite" ---
+    if (waypointIdx == pathWaypoints.size() - 1) {
+      if (deviation <= waypointTolerance) {
+        reached = true;
+        break;
+      } else if (deviation > waypointTolerance * 2.0) {
+        printf("[Follow] Overshot goal, correcting...\n");
+        updateStartPositionFromGPS();
+        calculatePath();
+        replans++;
+        waypointIdx = 0;
+        continue;
+      }
+    }
+
+    // --- 9) Yield so other logic can run ---
+    wait(20, msec);
   }
- 
-}
+
+  LeftDrivetrain.stop();
+  RightDrivetrain.stop();
+  printf("[Follow] Completed. Waypoints traversed=%zu\n", pathWaypoints.size());
 }
 // 9. Parameter tuning: expose parameters above for easy adjustment
 // 10. Unit tests: see test.hpp for path logic tests
