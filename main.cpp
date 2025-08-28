@@ -59,7 +59,10 @@ int main() {
   pre_auton();
   Competition.drivercontrol(drivercontrol);
   Competition.autonomous(autonomous);
-  
+  Controller1.ButtonR1.pressed(onButtonR1Press);
+  Controller1.ButtonR2.pressed(onButtonR2Press);
+  Controller1.ButtonL1.pressed(onButtonL1Press);
+  Controller1.ButtonL2.pressed(onButtonL2Press);
  
   
   
