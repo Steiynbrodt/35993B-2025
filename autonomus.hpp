@@ -5,14 +5,15 @@
 #include <queue>
 #include <fstream>
 #include <limits>
-#include "NAVI.hpp"
+#include "NAVI_fixed.hpp"
 
 using namespace vex;
 
 
 
- 
+ void hardcoded(void){
 
+ }
 
 
 
@@ -20,8 +21,12 @@ void AIMODE(void){
 
 }
 void autonomous() {
-    
-  NAVI(-1000,1000);
+ INS.calibrate();
+ wait(5,sec);
+  INS.setHeading(90,degrees);
+
+  turnToYaw(90);
+  
 
   
 }

@@ -1,52 +1,49 @@
-// turning the Intake forwards
-void onButtonR1Press()
-{
+
+#include "vex.h"
+
+   
+using namespace vex;
+  
+
+  
+    void onButtonR1Press(){
   //double donutDistance = DonutSensor.objectDistance(distanceUnits::mm);
   while(Controller1.ButtonR1.pressing())
   {
-    Intake.setVelocity(100, percent);
-    Intake.spin(forward);
+    in4.setVelocity(100, percent);
+    in4.spin(forward);
     vex::task::sleep(50);
   }
-  Intake.stop();
+  in4.stop();
   vex::task::sleep(50);
-}
+ }
 
 // turning the Intake backwards
-void onButtonR2Press()
-{
-  while(Controller1.ButtonR2.pressing())
-  {
-    Intake.setVelocity(-100, percent);
-    Intake.spin(forward);
-    vex::task::sleep(50);
-  }
-  Intake.stop();
-  vex::task::sleep(50);
+void onButtonR2Press(){
+  
 }
 
 // Motor to use the Holer
-void onButtonL1Press()
-{
-  while(Controller1.ButtonL1.pressing()){
-    Pneumatic1.set(!Pneumatic1.value());
-    vex::task::sleep(500);
+void onButtonL1Press(){
+  while(Controller1.ButtonR2.pressing())
+  {
+    in3.setVelocity(-100, percent);
+    in3.spin(forward);
+    vex::task::sleep(50);
   }
+  in3.stop();
+  vex::task::sleep(50);
  
 }
 
-void stakeropen(void){
-
-  Pneumatic1.set(!Pneumatic1.value());
-  vex::task::sleep(500);
-//holer.spin(forward,-100,percent);
-}
 
 void inntake(int intake ){
-  Intake.spin(forward,100,percent);
+  //Intake.spin(forward,100,percent);
   vex::task::sleep(intake);
-  Intake.stop();
+  //Intake.stop();
 }
 
 
   
+  
+

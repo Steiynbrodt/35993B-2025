@@ -16,7 +16,7 @@ double timeTaken;
  int replans;
   int stucks;
   bool enableLearning = true; // Learning aktivieren oder deaktivieren
-double initialHeadingOffset = 0.0;
+
 const double minTurn    = 0.2;   // Mindest-% zum Überwinden von Stiction
  const double maxTurn    = 5.0;  // Max-% für schnelles Drehen
 using namespace vex;
@@ -35,17 +35,41 @@ double shortestAngleDiff(double from, double to) {
   return diff;
 }
 
+static double initialHeadingOffset = 0.0;
+
+/**
+ * Call once at startup to align INS to GPS.
+ * Reads both sensors, computes the minimal signed difference (–180…+180)
+ * and stores it in initialHeadingOffset.
+ */
 void calibrateINSFromGPS() {
-  double gpsHeading = normalize360(GPS17.heading());
-  double insHeading = normalize360(INS.heading(degrees));
-  initialHeadingOffset = shortestAngleDiff(insHeading, gpsHeading);
-  printf("[Fusion] GPS=%.1f°, INS=%.1f°, Offset=%.1f°\n", gpsHeading, insHeading, initialHeadingOffset);
+  // 1) Read raw headings
+  double gpsH = normalize360(GPS17.heading(degrees));     // GPS in [–180,180] or [0,360]
+  double insH = INS.heading(degrees);       // INS in [0,360)
+  
+  // 2) Compute the signed offset: how much to add to INS to hit GPS
+  //    shortestAngleDiff(from,to) returns (to–from) in [–180,180]
+  auto shortestAngleDiff = [&](double from, double to) {
+    double d = to - from;
+    if (d > 180.0)  d -= 360.0;
+    if (d < -180.0) d += 360.0;
+    return d;
+  };
+  initialHeadingOffset = shortestAngleDiff(insH, gpsH);
+  
+  // 3) Diagnostic print
+  double fusedH = normalize360(insH + initialHeadingOffset);
+  printf("[Calib] GPS=%.1f°, INS=%.1f°, Offset=%.1f° → Fused=%.1f°\n",
+         gpsH, insH, initialHeadingOffset, fusedH);
 }
 
+/**
+ * Returns the “fused” heading in [0,360):
+ *   INS.heading + the offset you computed at startup.
+ */
 double getFusedHeading360() {
-  double h = INS.heading(degrees);
-  double fused = h + initialHeadingOffset;
-  return normalize360(fused);
+  double insH = normalize360(INS.heading(degrees));
+  return normalize360(insH + initialHeadingOffset);
 }
 
 

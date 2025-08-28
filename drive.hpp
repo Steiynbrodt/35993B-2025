@@ -3,8 +3,8 @@
 #include <cmath>
 #include <stdbool.h>
 #include <math.h>
-#include "buttons.hpp"
-
+#include <buttons.hpp>
+#include <thread>
 #define FMT_HEADER_ONLY
 using namespace vex;
 
@@ -33,79 +33,51 @@ bool DrivetrainNeedsToBeStopped_Controller1 = true;
 #pragma endregion VEXcode Generated Robot Configuration
 
  
-void controlling(){
+vex::task rc_auto_loop_task;
 
-    void onButtonR1Press(void){
- 
-     while(Controller1.ButtonR1.pressing())
-  {
-    in4.setVelocity(100, percent);
-    in4.spin(forward);
-    vex::task::sleep(50);
-  }
-  in.stop();
-  vex::task::sleep(50);
- }
-
-// turning the Intake backwards
-void onButtonR2Press(void){
-  while(Controller1.ButtonR2.pressing())
-  {
-    in2.setVelocity(-100, percent);
-    in2.spin(forward);
-    vex::task::sleep(50);
-  }
-  in2.stop();
-  vex::task::sleep(50);
-}
-
-// Motor to use the Holer
-void onButtonL1Press()
+bool DrivetrainNeedsToBeStopped_Controller1 = true;
+int rc_auto_loop_function_Controller1()
 {
-  while(Controller1.ButtonL1.pressing()){
-    
-  }
- 
-}
-
-void stakeropen(void){
-
-  
-//holer.spin(forward,-100,percent);
-}
-
-void inntake(int intake ){
-  Intake.spin(forward,100,percent);
-  vex::task::sleep(intake);
-  Intake.stop();
-}
-    
-
-  
-while (true)
+  while (true)
   {
-    double drivetrainLeftSideSpeed = Controller1.Axis3.position() - Controller1.Axis1.position()/2;
-    double drivetrainRightSideSpeed = Controller1.Axis3.position() +  Controller1.Axis1.position()/2;
+    double y = Controller1.Axis3.position();
+    double x = Controller1.Axis4.position();
+    double a = Controller1.Axis1.position();
 
-    //if (abs(drivetrainLeftSideSpeed) < 5 && abs(drivetrainRightSideSpeed) < 5 && DrivetrainNeedsToBeStopped_Controller1) DrivetrainNeedsToBeStopped_Controller1 = false;
-    //else DrivetrainNeedsToBeStopped_Controller1 = true;
+    // Apply deadzone
+    if (abs(y) < 3) y = 0;
+    if (abs(x) < 3) x = 0;
+    if (abs(a) < 3) a = 0;
 
-    //double y = Controller1.Axis3.position();
-    //double x = Controller1.Axis4.position();
-    //double a = Controller1.Axis1.position();
+    // Normalize inputs to range [-1,1]
+    double normY = y / 100.0;
+    double normA = a / 100.0;
 
-    //if (y >= -5 && y <= 5) y = 0;
-    //if (x >= -5 && x <= 5) x = 0;
-    //if (a >= -5 && a <= 5) a = 0;
+    // Exponential scaling (cubing keeps the sign and smoothens the curve)
+    double expY = (0.25 * normY) + (0.75 * pow(normY, 3));
+    double expA = (0.25 * normA) + (0.75 * pow(normA, 3));
 
-    //RightDrivetrain.spin(forward, y - a, percent);
-    //LeftDrivetrain.spin(forward, y + a, percent);
-    RightDrivetrain.spin(reverse,drivetrainRightSideSpeed, percent);
-    LeftDrivetrain.spin(reverse,drivetrainLeftSideSpeed, percent);
-    while(true){
-      controlling();
-    }
-  }}
+    expY *= 100;
+    expA *= 100;
+
+    RightDrivetrain.spin(forward, expY - expA / 2, percent);
+    LeftDrivetrain.spin(forward, expY + expA / 2, percent);
+  } 
+
+  return 0;
+}
+#pragma endregion VEXcode Generated Robot Configuration
+
+void drivercontrol(void)
+{
+  rc_auto_loop_task = vex::task(rc_auto_loop_function_Controller1);
+  task rc_auto_loop_task_Controller1(rc_auto_loop_function_Controller1);
+}
+    
+    
+    
+   
+  
   
   
 
