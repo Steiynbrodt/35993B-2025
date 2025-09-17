@@ -1,5 +1,6 @@
 #include "vex.h"
 #include "drive.hpp"
+
 #include "autonomus.hpp"
 #include "test.hpp"
 using namespace vex;
@@ -18,7 +19,6 @@ using namespace vex;
 /*  function is only called once after the V5 has been powered on and        */
 /*  not every time that the robot is disabled.                               */
 /*---------------------------------------------------------------------------*/
-
 void pre_auton(void) {
  GPS17.calibrate();
  logGPSData();
@@ -57,12 +57,11 @@ int main() {
   // Set up callbacks for autonomous and driver control periods.
   //test();
   pre_auton();
+  
+  
   Competition.drivercontrol(drivercontrol);
   Competition.autonomous(autonomous);
-  Controller1.ButtonR1.pressed(onButtonR1Press);
-  Controller1.ButtonR2.pressed(onButtonR2Press);
-  Controller1.ButtonL1.pressed(onButtonL1Press);
-  Controller1.ButtonL2.pressed(onButtonL2Press);
+  
  
   
   
