@@ -1,74 +1,101 @@
-/*----------------------------------------------------------------------------*/
-/*                                                                            */
-/*    Module:       main.cpp                                                  */
-/*    Author:       steiynbrodt                                                      */
-/*    Created:      6/4/2025, 1:34:35 PM                                      */
-/*    Description:  V5 project                                                */
-/*                                                                            */
-/*----------------------------------------------------------------------------*/
-
 #include "vex.h"
 #include "drive.hpp"
-#include "autonomus.hpp"
+#include "auton.hpp"
 using namespace vex;
 
-// A global instance of competition
+brain       Brain;
+controller  Controller1(controllerType::primary);
+competition Competition;
 
+// Drive-Motoren
+motor L1(PORT19, gearSetting::ratio18_1, false);
+motor L2(PORT15, gearSetting::ratio18_1, false);
+motor L3(PORT18, gearSetting::ratio18_1, false);
+motor R1(PORT2,  gearSetting::ratio18_1, true);
+motor R2(PORT9,  gearSetting::ratio18_1, true);
+motor R3(PORT10, gearSetting::ratio18_1, true);
 
-// define your global instances of motors and other devices here
+// Intake
+motor Motorblau      (PORT14, gearSetting::ratio18_1, false);
+motor Intakespeicher (PORT17, gearSetting::ratio18_1, false);
+motor Intakeoben     (PORT1,  gearSetting::ratio18_1, false);
 
-/*---------------------------------------------------------------------------*/
-/*                          Pre-Autonomous Functions                         */
-/*                                                                           */
-/*  You may want to perform some actions before the competition starts.      */
-/*  Do them in the following function.  You must return from this function   */
-/*  or the autonomous and usercontrol tasks will not be started.  This       */
-/*  function is only called once after the V5 has been powered on and        */
-/*  not every time that the robot is disabled.                               */
-/*---------------------------------------------------------------------------*/
+#if HAVE_PNEUMATICS
+digital_out DigitalOutA(Brain.ThreeWirePort.A);
+#endif
 
-void pre_auton(void) {
+// ------- Auton Helper -------
+inline double myAbs(double x){ return x<0 ? -x : x; }
+constexpr double PI = 3.14159265358979323846;
+constexpr double WHEEL_DIAM_MM  = 100.0;
+constexpr double TRACK_WIDTH_MM = 320.0;
 
-  // All activities that occur before the competition starts
-  // Example: clearing encoders, setting servo positions, ...
+double cmToDeg(double cm) {
+  const double wheel_circum_mm = PI * WHEEL_DIAM_MM;
+  const double dist_mm         = cm * 10.0;
+  const double revs            = dist_mm / wheel_circum_mm;
+  return revs * 360.0;
+}
+void leftSpinFor(directionType d, double rot, rotationUnits u, bool waitAll) {
+  L1.spinFor(d, rot, u, false);
+  L2.spinFor(d, rot, u, false);
+  L3.spinFor(d, rot, u, waitAll);
+}
+void rightSpinFor(directionType d, double rot, rotationUnits u, bool waitAll) {
+  R1.spinFor(d, rot, u, false);
+  R2.spinFor(d, rot, u, false);
+  R3.spinFor(d, rot, u, waitAll);
+}
+void setDriveVel(int pct) {
+  L1.setVelocity(pct, percentUnits::pct);
+  L2.setVelocity(pct, percentUnits::pct);
+  L3.setVelocity(pct, percentUnits::pct);
+  R1.setVelocity(pct, percentUnits::pct);
+  R2.setVelocity(pct, percentUnits::pct);
+  R3.setVelocity(pct, percentUnits::pct);
+}
+void driveStraight(double cm, int vel_pct = AUTON_DRIVE_SPEED) {
+  const double deg = cmToDeg(myAbs(cm));
+  const directionType dir = (cm >= 0) ? directionType::fwd : directionType::rev;
+  setDriveVel(vel_pct);
+  leftSpinFor(dir,  deg, rotationUnits::deg, false);
+  rightSpinFor(dir, deg, rotationUnits::deg, true);
+}
+void turnLeft(double deg, int vel_pct = AUTON_TURN_SPEED) {
+  const double arc_mm   = PI * TRACK_WIDTH_MM * (myAbs(deg) / 360.0);
+  const double arc_cm   = arc_mm / 10.0;
+  const double wheelDeg = cmToDeg(arc_cm);
+  setDriveVel(vel_pct);
+  leftSpinFor(directionType::fwd,  wheelDeg, rotationUnits::deg, false);
+  rightSpinFor(directionType::rev, wheelDeg, rotationUnits::deg, true);
 }
 
-/*---------------------------------------------------------------------------*/
-/*                                                                           */
-/*                              Autonomous Task                              */
-/*                                                                           */
-/*  This task is used to control your robot during the autonomous phase of   */
-/*  a VEX Competition.                                                       */
-/*                                                                           */
-/*  You must modify the code to add your own robot specific commands here.   */
-/*---------------------------------------------------------------------------*/
+// -------- Autonomous --------
+void auton::runAuto() {
+  driveStraight(-AUTON_FWD1);
+  turnLeft(+AUTON_TURN1);
+  driveStraight(-AUTON_FWD2);
 
+  Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+  Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
+  Intakeoben.spin    (directionType::fwd, 100, velocityUnits::pct);
+  wait(AUTON_INTAKE_IN, timeUnits::msec);
+  Motorblau.stop(); Intakespeicher.stop(); Intakeoben.stop();
 
+  turnLeft(+AUTON_TURN2);
 
-/*---------------------------------------------------------------------------*/
-/*                                                                           */
-/*                              User Control Task                            */
-/*                                                                           */
-/*  This task is used to control your robot during the user control phase of */
-/*  a VEX Competition.                                                       */
-/*                                                                           */
-/*  You must modify the code to add your own robot specific commands here.   */
-/*---------------------------------------------------------------------------*/
+  Motorblau.spin     (directionType::rev, 100, velocityUnits::pct);
+  Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
+  Intakeoben.spin    (directionType::rev, 100, velocityUnits::pct);
+  wait(AUTON_INTAKE_OUT, timeUnits::msec);
+  Motorblau.stop(); Intakespeicher.stop(); Intakeoben.stop();
+}
 
+void autonomous()    { auton::runAuto(); }
+void drivercontrol() { drive::run(); }
 
-
-//
-// Main will set up the competition functions and callbacks.
-//
 int main() {
-  // Set up callbacks for autonomous and driver control periods.
   Competition.autonomous(autonomous);
   Competition.drivercontrol(drivercontrol);
-  // Run the pre-autonomous function.
-  pre_auton();
-
-  // Prevent main from exiting with an infinite loop.
-  while (true) {
-    wait(100, msec);
-  }
+  while (true) wait(100, timeUnits::msec);
 }

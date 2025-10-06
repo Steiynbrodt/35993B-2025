@@ -1,56 +1,182 @@
+#pragma once
 #include "vex.h"
-#include <cstdlib>
-#include <cmath>
-#include <stdbool.h>
-
-#define FMT_HEADER_ONLY
 using namespace vex;
 
-brain Brain;
-competition Competition;
-controller Controller1 = controller(primary);
-digital_out Pneumatic1(Brain.ThreeWirePort.A);
-gps GPS17 = gps(PORT17, -80.00, 80.00, mm, -90);
-motor driveMotorRightOne = motor(PORT17, ratio18_1, false);   
-motor driveMotorLeftOne = motor(PORT1, ratio18_1, true);   
-motor driveMotorRightTwo = motor(PORT13, ratio18_1, false);
-motor driveMotorLeftTwo = motor(PORT9, ratio18_1, true); 
-motor driveMotorRightThree = motor(PORT14, ratio18_1, false);    
-motor driveMotorLeftThree = motor(PORT5, ratio18_1, true);
+// ============ OPTIONAL: Pneumatik aktivieren/deaktivieren ============
+#ifndef HAVE_PNEUMATICS
+#define HAVE_PNEUMATICS 0   // 0 = kein digital_out im Projekt, 1 = vorhanden
+#endif
+// =====================================================================
 
-motor_group RightDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree);
-motor_group LeftDrivetrain  = motor_group(driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
-motor_group FullDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree, driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
-bool DrivetrainNeedsToBeStopped_Controller1 = true;
-int rc_auto_loop_function_Controller1()
-{
-  
-  while (true)
-  {
-    
-    int drivetrainLeftSideSpeed = Controller1.Axis3.position() + Controller1.Axis4.position()/2;
-    int drivetrainRightSideSpeed = Controller1.Axis3.position() - Controller1.Axis4.position()/2;
+// ======================= Externe Geräte (aus main.cpp) ===============
+extern controller  Controller1;
 
-    if (abs(drivetrainLeftSideSpeed) < 5 && abs(drivetrainRightSideSpeed) < 5 && DrivetrainNeedsToBeStopped_Controller1) DrivetrainNeedsToBeStopped_Controller1 = false;
-    else DrivetrainNeedsToBeStopped_Controller1 = true;
+extern motor L1;
+extern motor L2;
+extern motor L3;
+extern motor R1;
+extern motor R2;
+extern motor R3;
 
-    double y = Controller1.Axis3.position();
-    double x = Controller1.Axis4.position();
-    double a = Controller1.Axis1.position();
+extern motor Motorblau;
+extern motor Intakespeicher;
+extern motor Intakeoben;
 
-    if (y >= -5 && y <= 5) y = 0;
-    if (x >= -5 && x <= 5) x = 0;
-    if (a >= -5 && a <= 5) a = 0;
+#if HAVE_PNEUMATICS
+extern digital_out DigitalOutA;
+#endif
+// =====================================================================
 
-    RightDrivetrain.spin(forward, y - a, percent);
-    LeftDrivetrain.spin(forward, y + a, percent);
+namespace drive {
+
+  // -------- Init --------
+  inline void initSpeeds() {
+    L1.setVelocity(90,  percentUnits::pct);
+    L2.setVelocity(90,  percentUnits::pct);
+    L3.setVelocity(90,  percentUnits::pct);
+    R1.setVelocity(100, percentUnits::pct);
+    R2.setVelocity(100, percentUnits::pct);
+    R3.setVelocity(100, percentUnits::pct);
   }
-  return 0;
-}
-#pragma endregion VEXcode Generated Robot Configuration
+  inline void initTorques() {
+    L1.setMaxTorque(90,  percentUnits::pct);
+    L2.setMaxTorque(90,  percentUnits::pct);
+    L3.setMaxTorque(90,  percentUnits::pct);
+    R1.setMaxTorque(100, percentUnits::pct);
+    R2.setMaxTorque(100, percentUnits::pct);
+    R3.setMaxTorque(100, percentUnits::pct);
+  }
+  inline void initIntake() {
+    Motorblau.setVelocity(100,      percentUnits::pct);
+    Motorblau.setMaxTorque(100,     percentUnits::pct);
+    Intakespeicher.setVelocity(100, percentUnits::pct);
+    Intakespeicher.setMaxTorque(100,percentUnits::pct);
+    Intakeoben.setVelocity(100,     percentUnits::pct);
+    Intakeoben.setMaxTorque(100,    percentUnits::pct);
+  }
 
-void drivercontrol(void)
-{
-  
-  task rc_auto_loop_task_Controller1(rc_auto_loop_function_Controller1);
+  // ------------------- Intake Handler -------------------
+  inline void stopIntakes() {
+    Motorblau.stop();
+    Intakespeicher.stop();
+    Intakeoben.stop();
+  }
+
+  inline void onR1Pressed() {  // Vollgas rein
+    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
+    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+    Intakeoben.spin    (directionType::fwd, 100, velocityUnits::pct);
+  }
+  inline void onR1Released() { stopIntakes(); }
+
+  // >>>>>>>>>>>>>>> HIER geändert: R2 <<<<<<<<<<<<<<
+  inline void onR2Pressed() {
+    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
+    Intakeoben.spin    (directionType::fwd,  70, velocityUnits::pct);
+  }
+  inline void onR2Released() { stopIntakes(); }
+
+  inline void onL1Pressed() {
+    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
+    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+  }
+  inline void onL1Released() { stopIntakes(); }
+
+  inline void onL2Pressed() {
+    Motorblau.spin     (directionType::rev, 100, velocityUnits::pct);
+    Intakeoben.spin    (directionType::fwd, 100, velocityUnits::pct);
+    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
+  }
+  inline void onL2Released() { stopIntakes(); }
+
+  inline void onYPressed() {
+    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
+  }
+  inline void onYReleased() { stopIntakes(); }
+
+  inline void onRightPressed() {
+    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
+    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
+  }
+  inline void onRightReleased() { stopIntakes(); }
+
+  inline void onUpPressed() {
+    Motorblau.spin  (directionType::fwd, 100, velocityUnits::pct);
+    Intakeoben.spin (directionType::fwd, 100, velocityUnits::pct);
+  }
+  inline void onUpReleased() { stopIntakes(); }
+
+  inline void onDownPressed() {
+    Motorblau.spin  (directionType::fwd, 100, velocityUnits::pct);
+    Intakeoben.spin (directionType::rev, 100, velocityUnits::pct);
+  }
+  inline void onDownReleased() { stopIntakes(); }
+
+  inline void onBPressed() {
+  #if HAVE_PNEUMATICS
+    DigitalOutA.set(true);
+  #endif
+  }
+  inline void onXPressed() {
+  #if HAVE_PNEUMATICS
+    DigitalOutA.set(false);
+  #endif
+  }
+
+  inline void bindEvents() {
+    Controller1.ButtonR1.pressed(onR1Pressed);
+    Controller1.ButtonR1.released(onR1Released);
+    Controller1.ButtonR2.pressed(onR2Pressed);
+    Controller1.ButtonR2.released(onR2Released);
+    Controller1.ButtonL1.pressed(onL1Pressed);
+    Controller1.ButtonL1.released(onL1Released);
+    Controller1.ButtonL2.pressed(onL2Pressed);
+    Controller1.ButtonL2.released(onL2Released);
+    Controller1.ButtonY.pressed(onYPressed);
+    Controller1.ButtonY.released(onYReleased);
+    Controller1.ButtonRight.pressed(onRightPressed);
+    Controller1.ButtonRight.released(onRightReleased);
+    Controller1.ButtonUp.pressed(onUpPressed);
+    Controller1.ButtonUp.released(onUpReleased);
+    Controller1.ButtonDown.pressed(onDownPressed);
+    Controller1.ButtonDown.released(onDownReleased);
+    Controller1.ButtonB.pressed(onBPressed);
+    Controller1.ButtonX.pressed(onXPressed);
+  }
+
+  // ------------------- Arcade-Drive Loop -------------------
+inline void runDriveLoop() {
+    while (true) {
+      // Joystick-Eingaben
+      double forward = Controller1.Axis3.position(percentUnits::pct);
+      double turn    = Controller1.Axis1.position(percentUnits::pct);
+
+      // --- ALLES invertieren ---
+      // vorwärts = rückwärts, rechts = links
+      forward = -forward;
+      turn    = -turn;
+
+      // Arcade mischen (nach Invertierung)
+      double leftMix  = forward + turn;
+      double rightMix = forward - turn;
+
+      // Auf Motoren anwenden
+      L1.spin(directionType::fwd, leftMix,  velocityUnits::pct);
+      L2.spin(directionType::fwd, leftMix,  velocityUnits::pct);
+      L3.spin(directionType::fwd, leftMix,  velocityUnits::pct);
+
+      R1.spin(directionType::fwd, rightMix, velocityUnits::pct);
+      R2.spin(directionType::fwd, rightMix, velocityUnits::pct);
+      R3.spin(directionType::fwd, rightMix, velocityUnits::pct);
+
+      wait(15, timeUnits::msec);
+    }
+  }
+
+  inline void run() {
+    bindEvents();
+    runDriveLoop();
+  }
 }
