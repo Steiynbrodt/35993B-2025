@@ -1,182 +1,129 @@
-#pragma once
 #include "vex.h"
+#include <cstdlib>
+#include <cmath>
+#include <stdbool.h>
+#include <math.h>
+
+#include <thread>
+#define FMT_HEADER_ONLY
 using namespace vex;
 
-// ============ OPTIONAL: Pneumatik aktivieren/deaktivieren ============
-#ifndef HAVE_PNEUMATICS
-#define HAVE_PNEUMATICS 0   // 0 = kein digital_out im Projekt, 1 = vorhanden
-#endif
-// =====================================================================
+brain Brain;
+competition Competition;
+controller Controller1 = controller(primary);
+gps GPS17 = gps(PORT15,-100.00, +30.00, mm, +90);
 
-// ======================= Externe Geräte (aus main.cpp) ===============
-extern controller  Controller1;
+inertial INS  = inertial(PORT20);
 
-extern motor L1;
-extern motor L2;
-extern motor L3;
-extern motor R1;
-extern motor R2;
-extern motor R3;
+motor driveMotorLeftOne = motor(PORT19, ratio18_1, false);  
+motor driveMotorLeftTwo = motor(PORT15, ratio18_1, false); 
+motor driveMotorLeftThree = motor(PORT18, ratio18_1, false);
 
-extern motor Motorblau;
-extern motor Intakespeicher;
-extern motor Intakeoben;
 
-#if HAVE_PNEUMATICS
-extern digital_out DigitalOutA;
-#endif
-// =====================================================================
+motor driveMotorRightOne = motor(PORT2, ratio18_1, true); 
+motor driveMotorRightTwo = motor(PORT9, ratio18_1, true);
+motor driveMotorRightThree = motor(PORT10, ratio18_1, true);  
 
-namespace drive {
+motor in1 = motor(PORT1, ratio18_1, false);  
+motor in2 = motor(PORT17 ,ratio18_1, false); 
+motor in3 = motor(PORT14, ratio18_1, false); 
+//motor in4 = motor(PORT5, ratio18_1, false); 
 
-  // -------- Init --------
-  inline void initSpeeds() {
-    L1.setVelocity(90,  percentUnits::pct);
-    L2.setVelocity(90,  percentUnits::pct);
-    L3.setVelocity(90,  percentUnits::pct);
-    R1.setVelocity(100, percentUnits::pct);
-    R2.setVelocity(100, percentUnits::pct);
-    R3.setVelocity(100, percentUnits::pct);
-  }
-  inline void initTorques() {
-    L1.setMaxTorque(90,  percentUnits::pct);
-    L2.setMaxTorque(90,  percentUnits::pct);
-    L3.setMaxTorque(90,  percentUnits::pct);
-    R1.setMaxTorque(100, percentUnits::pct);
-    R2.setMaxTorque(100, percentUnits::pct);
-    R3.setMaxTorque(100, percentUnits::pct);
-  }
-  inline void initIntake() {
-    Motorblau.setVelocity(100,      percentUnits::pct);
-    Motorblau.setMaxTorque(100,     percentUnits::pct);
-    Intakespeicher.setVelocity(100, percentUnits::pct);
-    Intakespeicher.setMaxTorque(100,percentUnits::pct);
-    Intakeoben.setVelocity(100,     percentUnits::pct);
-    Intakeoben.setMaxTorque(100,    percentUnits::pct);
-  }
+motor_group RightDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree);
+motor_group LeftDrivetrain  = motor_group(driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
+motor_group FullDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree, driveMotorLeftOne, driveMotorLeftTwo, driveMotorLeftThree);
+bool DrivetrainNeedsToBeStopped_Controller1 = false;
 
-  // ------------------- Intake Handler -------------------
-  inline void stopIntakes() {
-    Motorblau.stop();
-    Intakespeicher.stop();
-    Intakeoben.stop();
-  }
 
-  inline void onR1Pressed() {  // Vollgas rein
-    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
-    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
-    Intakeoben.spin    (directionType::fwd, 100, velocityUnits::pct);
-  }
-  inline void onR1Released() { stopIntakes(); }
 
-  // >>>>>>>>>>>>>>> HIER geändert: R2 <<<<<<<<<<<<<<
-  inline void onR2Pressed() {
-    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
-    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
-    Intakeoben.spin    (directionType::fwd,  70, velocityUnits::pct);
-  }
-  inline void onR2Released() { stopIntakes(); }
+#pragma endregion VEXcode Generated Robot Configuration
 
-  inline void onL1Pressed() {
-    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
-    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
-  }
-  inline void onL1Released() { stopIntakes(); }
 
-  inline void onL2Pressed() {
-    Motorblau.spin     (directionType::rev, 100, velocityUnits::pct);
-    Intakeoben.spin    (directionType::fwd, 100, velocityUnits::pct);
-    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
-  }
-  inline void onL2Released() { stopIntakes(); }
 
-  inline void onYPressed() {
-    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
-    Intakespeicher.spin(directionType::rev, 100, velocityUnits::pct);
-  }
-  inline void onYReleased() { stopIntakes(); }
+ 
+vex::task rc_auto_loop_task;
 
-  inline void onRightPressed() {
-    Motorblau.spin     (directionType::fwd, 100, velocityUnits::pct);
-    Intakespeicher.spin(directionType::fwd, 100, velocityUnits::pct);
-  }
-  inline void onRightReleased() { stopIntakes(); }
-
-  inline void onUpPressed() {
-    Motorblau.spin  (directionType::fwd, 100, velocityUnits::pct);
-    Intakeoben.spin (directionType::fwd, 100, velocityUnits::pct);
-  }
-  inline void onUpReleased() { stopIntakes(); }
-
-  inline void onDownPressed() {
-    Motorblau.spin  (directionType::fwd, 100, velocityUnits::pct);
-    Intakeoben.spin (directionType::rev, 100, velocityUnits::pct);
-  }
-  inline void onDownReleased() { stopIntakes(); }
-
-  inline void onBPressed() {
-  #if HAVE_PNEUMATICS
-    DigitalOutA.set(true);
-  #endif
-  }
-  inline void onXPressed() {
-  #if HAVE_PNEUMATICS
-    DigitalOutA.set(false);
-  #endif
-  }
-
-  inline void bindEvents() {
-    Controller1.ButtonR1.pressed(onR1Pressed);
-    Controller1.ButtonR1.released(onR1Released);
-    Controller1.ButtonR2.pressed(onR2Pressed);
-    Controller1.ButtonR2.released(onR2Released);
-    Controller1.ButtonL1.pressed(onL1Pressed);
-    Controller1.ButtonL1.released(onL1Released);
-    Controller1.ButtonL2.pressed(onL2Pressed);
-    Controller1.ButtonL2.released(onL2Released);
-    Controller1.ButtonY.pressed(onYPressed);
-    Controller1.ButtonY.released(onYReleased);
-    Controller1.ButtonRight.pressed(onRightPressed);
-    Controller1.ButtonRight.released(onRightReleased);
-    Controller1.ButtonUp.pressed(onUpPressed);
-    Controller1.ButtonUp.released(onUpReleased);
-    Controller1.ButtonDown.pressed(onDownPressed);
-    Controller1.ButtonDown.released(onDownReleased);
-    Controller1.ButtonB.pressed(onBPressed);
-    Controller1.ButtonX.pressed(onXPressed);
-  }
-
-  // ------------------- Arcade-Drive Loop -------------------
-inline void runDriveLoop() {
-    while (true) {
-      // Joystick-Eingaben
-      double forward = Controller1.Axis3.position(percentUnits::pct);
-      double turn    = Controller1.Axis1.position(percentUnits::pct);
-
-      // --- ALLES invertieren ---
-      // vorwärts = rückwärts, rechts = links
-      forward = -forward;
-      turn    = -turn;
-
-      // Arcade mischen (nach Invertierung)
-      double leftMix  = forward + turn;
-      double rightMix = forward - turn;
-
-      // Auf Motoren anwenden
-      L1.spin(directionType::fwd, leftMix,  velocityUnits::pct);
-      L2.spin(directionType::fwd, leftMix,  velocityUnits::pct);
-      L3.spin(directionType::fwd, leftMix,  velocityUnits::pct);
-
-      R1.spin(directionType::fwd, rightMix, velocityUnits::pct);
-      R2.spin(directionType::fwd, rightMix, velocityUnits::pct);
-      R3.spin(directionType::fwd, rightMix, velocityUnits::pct);
-
-      wait(15, timeUnits::msec);
-    }
-  }
-
-  inline void run() {
-    bindEvents();
-    runDriveLoop();
-  }
+   
+void inntake(int intake ){
+  //Intake.spin(forward,100,percent);
+  vex::task::sleep(intake);
+  //Intake.stop();
 }
+
+
+ //buttons 
+void R1Pressed()  { in1.setVelocity(100, percent); in1.spin(forward); }
+void R1Released() { in1.stop(coast); }
+
+void R2Pressed()  { in1.setVelocity(100, percent); in1.spin(reverse); }
+void R2Released() { in1.stop(coast); }
+
+void L1Pressed()  { in3.setVelocity(100, percent); in3.spin(reverse); } // was -100% in your code
+void L1Released() { in3.stop(coast); }
+
+void L2Pressed()  { in3.setVelocity(100, percent); in3.spin(forward); }
+void L2Released() { in3.stop(coast); }
+
+
+
+void RrPressed()  { in2.setVelocity(100, percent); in2.spin(forward); }
+void RrReleased() { in2.stop(coast); }
+
+void yPressed()  { in2.setVelocity(100, percent); in2.spin(reverse); }
+void yReleased() { in2.stop(coast); }
+
+
+
+void drivercontrol(void) {
+  
+  // --- Button bindings (pressed + released) ---
+  Controller1.ButtonR1.pressed(R1Pressed);
+  Controller1.ButtonR1.released(R1Released);
+
+  Controller1.ButtonR2.pressed(R2Pressed);
+  Controller1.ButtonR2.released(R2Released);
+
+  Controller1.ButtonL1.pressed(L1Pressed);
+  Controller1.ButtonL1.released(L1Released);
+
+  Controller1.ButtonL2.pressed(L2Pressed);
+  Controller1.ButtonL2.released(L2Released);
+
+  // If you want Right + Y to control in2 (as in your code)
+  Controller1.ButtonRight.pressed(RrPressed);
+  Controller1.ButtonRight.released(RrReleased);
+
+  Controller1.ButtonY.pressed(yPressed);
+  Controller1.ButtonY.released(yReleased);
+
+  // If you actually wanted Up (instead of Right), use this instead:
+  // Controller1.ButtonUp.pressed(RrPressed);
+  // Controller1.ButtonUp.released(RrReleased);
+
+while (true) {
+  
+    double leftm  = Controller1.Axis3.position() - Controller1.Axis1.position() / 2.0;
+    double rightm = Controller1.Axis3.position() + Controller1.Axis1.position() / 2.0;
+
+    LeftDrivetrain.spin(reverse, leftm, percent);
+    RightDrivetrain.spin(reverse, rightm, percent);
+
+    wait(20, msec); 
+    
+  
+}
+}
+    
+    
+ 
+  
+  
+  
+
+ 
+  
+
+
+
+
+

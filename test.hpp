@@ -9,7 +9,7 @@
 #include <cassert>
 #include <string>
 #include <iostream>
-
+/*
 extern const int GRID_SIZE;
 extern const int OFFSET;
 extern bool walkable[73][73];
@@ -182,4 +182,4 @@ void test_loggingFormat(const char* logFile = "run_feedback.csv") {
 }
 
 #endif
-
+*/

@@ -1,3 +1,4 @@
+// src/main.cpp
 #include "vex.h"
 #include <algorithm>
 #include <cmath>
@@ -13,9 +14,9 @@ using namespace vex;
 // Globals / Parameters
 // =====================
 double timeTaken = 0.0;
-int replans = 0;
-int stucks = 0;
-bool enableLearning = true;
+int    replans   = 0;
+int    stucks    = 0;
+bool   enableLearning = true;
 
 static double initialHeadingOffset = 0.0;
 
@@ -29,16 +30,64 @@ double deviationThreshold  = 50.0;   // mm (adaptive near goal)
 double headingToleranceDeg = 10.0;   // deg allowable at waypoints
 bool   pathSmoothingEnabled = true;
 
+template<typename T>
+static inline T clampv(T v, T lo, T hi) {
+  return v < lo ? lo : (v > hi ? hi : v);
+}
 // Start/goal in grid coords (centered at 0,0)
 int startX = 0, startY = 0;
 int goalX  = 0, goalY  = 0;
 
-// Walkable grid and “isPath” display buffer
-bool walkable[GRID_SIZE][GRID_SIZE];
-bool isPath [GRID_SIZE][GRID_SIZE] = {{false}};
+// Walkable grid and path display buffer
+static bool walkable[GRID_SIZE][GRID_SIZE];
+static bool isPath [GRID_SIZE][GRID_SIZE] = {{false}};
 
 // Current planned path (grid coords)
 std::vector<std::pair<int,int>> pathWaypoints;
+
+// =====================
+// Forward Declarations
+// =====================
+static inline double norm360(double a);
+static inline double angDiff(double from, double to);
+static inline double clampd(double v, double lo, double hi);
+static inline int    clampi(int v, int lo, int hi);
+
+void    calibrateINSFromGPS();
+double  getFusedHeading360();
+bool    turnToHeadingAbs(double targetDeg, double stopTolDeg = 1.5, int maxMs = 1500);
+
+void    logGPSData();
+void    logRunFeedback(bool success, double timeTaken, int replans, int stucks,
+                       double finalDeviation, int operatorRating, const std::string& notes);
+
+double  gridToMM(int g);
+int     toGridCoord(double mm);
+void    addObstacleWithMargin(int gx, int gy);
+void    updateStartPositionFromGPS();
+
+struct Node;
+extern Node* nodes[GRID_SIZE][GRID_SIZE];
+int     heuristic(int x1,int y1,int x2,int y2);
+bool    isLineClear(int x0, int y0, int x1, int y1);
+void    simplifyPath(std::vector<std::pair<int,int>>& wps);
+void    smoothPath(std::vector<std::pair<int,int>>& wps);
+void    calculatePath();
+static void waitDebounce(int ms = 120) {
+  vex::this_thread::sleep_for(ms);
+}
+bool    driveToWithRecovery(double targetXmm, double targetYmm);
+
+void    followPath();
+void    applyLearnedTuning();
+void    NAVI(double targetXmm, double targetYmm);
+
+// UI / operator feedback
+
+static void drawRatingScreen(int rating);
+static void drawNotesScreen(const std::vector<std::string>& notes,
+                            const std::vector<bool>& selected, int cursor);
+bool getOperatorFeedback(int& outRating, std::string& outNotes);
 
 // =====================
 // Math / Angle helpers
@@ -68,10 +117,7 @@ static inline int clampi(int v, int lo, int hi) {
 void calibrateINSFromGPS() {
   double gpsH = norm360(GPS17.heading(vex::degrees));
   double insH = norm360(INS.heading (vex::degrees));
-
-  // Add this offset to INS to match GPS heading
   initialHeadingOffset = angDiff(insH, gpsH);
-
   double fused = norm360(insH + initialHeadingOffset);
   printf("[Calib] GPS=%.1f INS=%.1f Offset=%.1f → Fused=%.1f\n",
          gpsH, insH, initialHeadingOffset, fused);
@@ -84,7 +130,7 @@ double getFusedHeading360() {
 // =====================
 // Turn helper (absolute target heading in 0–360)
 // =====================
-bool turnToHeadingAbs(double targetDeg, double stopTolDeg = 1.5, int maxMs = 1500) {
+bool turnToHeadingAbs(double targetDeg, double stopTolDeg, int maxMs) {
   targetDeg = norm360(targetDeg);
   const double minPct = 6.0, maxPct = 40.0;
 
@@ -123,13 +169,13 @@ void logGPSData() {
   fclose(f);
 }
 
-void logRunFeedback(bool success, double timeTaken, int replans, int stucks,
+void logRunFeedback(bool success, double timeTaken_, int replans_, int stucks_,
                     double finalDeviation, int operatorRating, const std::string& notes) {
   FILE* f = fopen("run_feedback.csv", "a");
   if (!f) return;
   long now = (long)::time(0);
   fprintf(f, "%ld,%d,%.2f,%d,%d,%.2f,%d,%s\n",
-          now, success ? 1 : 0, timeTaken, replans, stucks, finalDeviation, operatorRating, notes.c_str());
+          now, success ? 1 : 0, timeTaken_, replans_, stucks_, finalDeviation, operatorRating, notes.c_str());
   fclose(f);
 }
 
@@ -138,12 +184,12 @@ void logRunFeedback(bool success, double timeTaken, int replans, int stucks,
 // =====================
 double gridToMM(int g) { return g * CELL_SIZE; }
 
-int toGridCoord(double mm) {
-  return clampi((int)std::round(mm / CELL_SIZE), -OFFSET, OFFSET);
+int toGridCoord(double mmv) {
+  return clampi((int)std::round(mmv / CELL_SIZE), -OFFSET, OFFSET);
 }
 
 void addObstacleWithMargin(int gx, int gy) {
-  for (int dx = -1; dx <= 1; ++dx) {
+  for (int dx = -1; dx <= 1; ++dx)
     for (int dy = -1; dy <= 1; ++dy) {
       int nx = gx + dx;
       int ny = gy + dy;
@@ -151,7 +197,6 @@ void addObstacleWithMargin(int gx, int gy) {
         walkable[ny + OFFSET][nx + OFFSET] = false;
       }
     }
-  }
 }
 
 void updateStartPositionFromGPS() {
@@ -177,7 +222,7 @@ struct Node {
   Node* parent;
   int fCost() const { return gCost + hCost; }
 };
-Node* nodes[GRID_SIZE][GRID_SIZE];
+Node* nodes[GRID_SIZE][GRID_SIZE] = {{nullptr}};
 
 // Octile heuristic (consistent w/ diagonal move cost 14)
 int heuristic(int x1,int y1,int x2,int y2){
@@ -245,17 +290,15 @@ void smoothPath(std::vector<std::pair<int,int>>& wps) {
 
 // Run A* and fill pathWaypoints
 void calculatePath() {
-  // Reset grid to walkable
+  // leave any previously marked obstacles; ensure bounds are set
   for (int y = 0; y < GRID_SIZE; ++y)
     for (int x = 0; x < GRID_SIZE; ++x)
-      walkable[y][x] = (walkable[y][x]); // leave any obstacles you set
+      isPath[y][x] = false;
 
   // Fresh node pool
   for (int y = 0; y < GRID_SIZE; ++y)
-    for (int x = 0; x < GRID_SIZE; ++x) {
+    for (int x = 0; x < GRID_SIZE; ++x)
       nodes[y][x] = new Node{ x - OFFSET, y - OFFSET, 999999, 999999, nullptr };
-      isPath[y][x] = false;
-    }
 
   pathWaypoints.clear();
 
@@ -335,7 +378,6 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
   const double tolMM   = 30.0;
   const double basePct = 10.0;
 
-  double lastDist = 1e9;
   double lastProgress = 1e9;
   int stagnantMs = 0;
 
@@ -371,9 +413,6 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
     LeftDrivetrain.spin (fwd, pct, percent);
     RightDrivetrain.spin(fwd, pct, percent);
 
-    printf("[Drive] Target %.0f/%.0f | Pos %.0f/%.0f | Δ%.0f | H=%.1f\n",
-           targetXmm, targetYmm, cx, cy, dist, currH);
-
     // progress monitor (3 mm improvement threshold)
     if (dist < lastProgress - 3.0) {
       lastProgress = dist;
@@ -392,7 +431,6 @@ bool driveToWithRecovery(double targetXmm, double targetYmm) {
       return false;
     }
 
-    lastDist = dist;
     wait(50, msec);
   }
 }
@@ -429,18 +467,15 @@ void followPath() {
     return;
   }
 
-  // progress tracking
   static double lastX = -1e9, lastY = -1e9;
   static int    noProgressCount = 0;
-
-  // replan rate limit
   static double lastReplanTime = -1e9;
 
   bool reached = false;
   size_t i = 0;
 
   while (!reached && i < pathWaypoints.size()) {
-    // optional line-of-sight lookahead skip (cheap smoothing of zig-zags)
+    // optional LoS lookahead skip
     while (i + 1 < pathWaypoints.size()) {
       auto [ax, ay] = pathWaypoints[i];
       auto [bx, by] = pathWaypoints[i+1];
@@ -448,7 +483,7 @@ void followPath() {
       else break;
     }
 
-    auto [gx, gy] = pathWaypoints[i];
+    auto [gx, gy]   = pathWaypoints[i];
     double targetXmm = gridToMM(gx);
     double targetYmm = gridToMM(gy);
 
@@ -466,7 +501,7 @@ void followPath() {
     double dy = targetYmm - cy;
     double deviation = std::sqrt(dx*dx + dy*dy);
 
-    // desired heading towards next waypoint (or along segment)
+    // desired heading
     double desiredH = (i + 1 < pathWaypoints.size())
       ? norm360(std::atan2(gridToMM(pathWaypoints[i+1].second) - cy,
                            gridToMM(pathWaypoints[i+1].first ) - cx) * 180.0 / M_PI)
@@ -477,7 +512,7 @@ void followPath() {
     printf("[Follow] wp %zu/%zu → (%.1f,%.1f) pos(%.1f,%.1f) dev=%.1f H=%.1f (des=%.1f err=%.1f)\n",
            i, pathWaypoints.size()-1, targetXmm, targetYmm, cx, cy, deviation, currH, desiredH, hErr);
 
-    // If badly off-heading, correct now (quick snap turn)
+    // heading correction
     if (std::fabs(hErr) > headingToleranceDeg) {
       turnToHeadingAbs(desiredH, 1.5, 1200);
     }
@@ -493,7 +528,7 @@ void followPath() {
       printf("[Follow] No progress → driveToWithRecovery()\n");
       bool recovered = driveToWithRecovery(targetXmm, targetYmm);
       if (!recovered) stucks++;
-      return; // stop following old path — NAVI will replan/continue
+      return; // recovery requested replan already
     }
 
     // too far off → replan (rate limited)
@@ -512,7 +547,7 @@ void followPath() {
       }
     }
 
-    // If close enough to waypoint → advance
+    // close enough → next waypoint
     if (deviation < waypointTolerance) {
       ++i;
       if (i >= pathWaypoints.size()) {
@@ -573,6 +608,113 @@ void applyLearnedTuning() {
 }
 
 // =====================
+// UI / Operator Feedback
+// =====================
+
+
+static void drawRatingScreen(int rating) {
+  Brain.Screen.clearScreen();
+  Brain.Screen.setFont(monoXXL);
+  Brain.Screen.setPenColor(white);
+  Brain.Screen.printAt(20, 60, false, "Rate the run");
+  Brain.Screen.setFont(monoM);
+  Brain.Screen.printAt(20, 110, false, "Up/Down, A=Confirm, B=Cancel");
+  Brain.Screen.setFont(monoXXL);
+  Brain.Screen.printAt(20, 200, false, "%d", rating);
+}
+
+static void drawNotesScreen(const std::vector<std::string>& notes,
+                            const std::vector<bool>& selected,
+                            int cursor) {
+  Brain.Screen.clearScreen();
+  Brain.Screen.setFont(monoL);
+  Brain.Screen.setPenColor(white);
+  Brain.Screen.printAt(20, 50, false, "Notes (X toggle, L/R move, A save, B skip)");
+
+  int x0 = 20, y0 = 100, step = 30;
+  for (size_t i=0; i<notes.size(); ++i){
+    int y = y0 + (int)i*step;
+    bool isCur = ((int)i == cursor);
+    Brain.Screen.setPenColor(isCur ? yellow : white);
+    Brain.Screen.printAt(x0, y, false, "%s %s",
+      selected[i] ? "[x]" : "[ ]",
+      notes[i].c_str());
+  }
+}
+
+bool getOperatorFeedback(int& outRating, std::string& outNotes){
+  // --- Rating pick (1..5) ---
+  int rating = clampv(outRating<=0 ? 5 : outRating, 1, 5);
+  drawRatingScreen(rating);
+
+  while (true){
+    if (Controller1.ButtonUp.pressing()){
+     rating = clampv(rating+1, 1, 5);
+      drawRatingScreen(rating);
+      waitDebounce();
+    } else if (Controller1.ButtonDown.pressing()){
+      rating = clampv(rating-1, 1, 5);
+      drawRatingScreen(rating);
+      waitDebounce();
+    } else if (Controller1.ButtonA.pressing()){
+      waitDebounce();
+      break; // confirmed
+    } else if (Controller1.ButtonB.pressing()){
+      waitDebounce();
+      return false; // canceled
+    }
+    vex::this_thread::sleep_for(20);
+  }
+
+  // --- Notes multi-select ---
+  std::vector<std::string> choices = {
+    "Smooth", "Hesitated", "Overshoot", "Stuck", "Many replans",
+    "Good heading", "Wheel slip", "Sensor glitch", "Other"
+  };
+  std::vector<bool> chosen(choices.size(), false);
+  int cur = 0;
+  drawNotesScreen(choices, chosen, cur);
+
+  while (true){
+    if (Controller1.ButtonLeft.pressing()){
+      cur = (cur==0) ? (int)choices.size()-1 : cur-1;
+      drawNotesScreen(choices, chosen, cur);
+      waitDebounce();
+    } else if (Controller1.ButtonRight.pressing()){
+      cur = (cur==(int)choices.size()-1) ? 0 : cur+1;
+      drawNotesScreen(choices, chosen, cur);
+      waitDebounce();
+    } else if (Controller1.ButtonX.pressing()){
+      chosen[cur] = !chosen[cur];
+      drawNotesScreen(choices, chosen, cur);
+      waitDebounce();
+    } else if (Controller1.ButtonA.pressing()){
+      waitDebounce();
+      break; // save notes
+    } else if (Controller1.ButtonB.pressing()){
+      waitDebounce();
+      outNotes.clear();
+      outRating = rating;
+      return true;
+    }
+    vex::this_thread::sleep_for(20);
+  }
+
+  // Build comma-separated notes string
+  std::string notes;
+  for (size_t i=0; i<choices.size(); ++i){
+    if (chosen[i]){
+      if (!notes.empty()) notes += ", ";
+      notes += choices[i];
+    }
+  }
+
+  outRating = rating;
+  outNotes  = notes;
+  return true;
+}
+
+// =====================
 // Main NAVI entry
 // =====================
 void NAVI(double targetXmm, double targetYmm) {
@@ -612,11 +754,18 @@ void NAVI(double targetXmm, double targetYmm) {
   double fdev = std::sqrt((fx - targetXmm)*(fx - targetXmm) + (fy - targetYmm)*(fy - targetYmm));
   bool success = fdev <= waypointTolerance;
 
-  // Log supervised feedback
-  int operatorRating = 5;
-  std::string notes  = "Auto log";
+  // Operator feedback (interactive)
+  int         operatorRating = 5;   // default
+  std::string notes;
+  bool got = getOperatorFeedback(operatorRating, notes);
+  if (!got) notes = "Canceled";
+
   logRunFeedback(success, timeTaken, replans, stucks, fdev, operatorRating, notes);
 
   printf("[NAVI] Done. success=%d time=%.2fs replans=%d stucks=%d finalDev=%.1fmm\n",
          success ? 1 : 0, timeTaken, replans, stucks, fdev);
 }
+
+// =====================
+// Competition hooks
+// =====================
