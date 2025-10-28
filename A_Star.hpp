@@ -1,8 +1,10 @@
 #include <queue>
 #include <vector>
 #include <cmath>
+#include "vex.h"
 #include <limits>
 #include <utility>
+#include "drive.hpp"
 #include "fieldparameters.hpp"
 
 // --- A* (Octile) on your Grid -----------------------------------------------
@@ -153,6 +155,146 @@ inline void paintPath(Grid& g, const std::vector<std::pair<int,int>>& path) {
 
 } // namespace pathfind
 
+
+struct CellXY { int x, y; };
+
+// -------- helpers --------
+inline double wrap180(double a){
+    while (a >  180.0) a -= 360.0;
+    while (a < -180.0) a += 360.0;
+    return a;
+}
+
+// Map 8-neighbor (dx,dy) to a compass angle in degrees.
+// We use the standard math convention: +x = 0°, +y = +90°.
+inline bool directionAngleDeg(int dx, int dy, double& outDeg){
+    // normalize to -1,0,1
+    dx = (dx > 0) - (dx < 0);
+    dy = (dy > 0) - (dy < 0);
+    if (dx == 0 && dy == 0) return false;
+
+    if      (dx ==  1 && dy ==  0) outDeg =   0.0;   // E
+    else if (dx ==  1 && dy ==  1) outDeg =  45.0;   // NE
+    else if (dx ==  0 && dy ==  1) outDeg =  90.0;   // N
+    else if (dx == -1 && dy ==  1) outDeg = 135.0;   // NW
+    else if (dx == -1 && dy ==  0) outDeg = 180.0;   // W (same as -180)
+    else if (dx == -1 && dy == -1) outDeg = -135.0;  // SW
+    else if (dx ==  0 && dy == -1) outDeg =  -90.0;  // S
+    else if (dx ==  1 && dy == -1) outDeg =  -45.0;  // SE
+    else return false;
+
+    return true;
+}
+
+// Turn by multiple ±stepDeg increments to reach target
+inline void turnBySteps(double& currentHeadingDeg,
+                        double targetHeadingDeg,
+                        double stepDeg,
+                        const std::function<void(double)>& turnStepDeg)
+{
+    double err = wrap180(targetHeadingDeg - currentHeadingDeg);
+    while (std::fabs(err) > stepDeg / 2.0) {
+        double step = std::min(std::fabs(err), stepDeg);
+        double signedStep = (err >= 0 ? +step : -step);
+        turnStepDeg(signedStep);                 // ← your motor turn here
+        currentHeadingDeg = wrap180(currentHeadingDeg + signedStep);
+        err = wrap180(targetHeadingDeg - currentHeadingDeg);
+    }
+}
+void  turnStepDeg(double angle){
+    INS.setRotation(0,degrees);
+ if(angle >0){
+ 
+  while( std::abs(INS.rotation()) != angle){
+    LeftDrivetrain.spin(forward, 5, percent);
+    RightDrivetrain.spin(reverse,5 , percent);
+  }
+ }
+ else if (angle<0){
+     while( std::abs(INS.rotation()) != angle){
+    LeftDrivetrain.spin(reverse, 5, percent);
+    RightDrivetrain.spin(forward,5 , percent);
+  }
+ }
+  
+}
+// -------- main routine --------
+// cellMm: size of a grid cell in millimeters
+// stepDeg: size of your discrete turn steps (e.g., 25°)
+inline void navigatePath(const std::vector<CellXY>& path,
+                         double cellMm,
+                         double initialHeadingDeg,
+                         double stepDeg,
+                         const std::function<void(double)>& turnStepDeg,
+                         const std::function<void(double)>& driveStraightMm)
+{
+    if (path.size() < 2) return;
+
+    double heading = initialHeadingDeg;
+
+    // compress runs with same (dx,dy)
+    size_t i = 0;
+    while (i + 1 < path.size()) {
+        int dx = path[i+1].x - path[i].x;
+        int dy = path[i+1].y - path[i].y;
+        // normalize to unit step
+        dx = (dx > 0) - (dx < 0);
+        dy = (dy > 0) - (dy < 0);
+        if (dx == 0 && dy == 0) { ++i; continue; }
+
+        // grow the run while direction stays the same
+        size_t j = i + 1;
+        while (j + 1 < path.size()) {
+            int ndx = (path[j+1].x - path[j].x);
+            int ndy = (path[j+1].y - path[j].y);
+            ndx = (ndx > 0) - (ndx < 0);
+            ndy = (ndy > 0) - (ndy < 0);
+            if (ndx != dx || ndy != dy) break;
+            ++j;
+        }
+
+        // direction → target heading
+        double targetDeg = 0.0;
+        if (!directionAngleDeg(dx, dy, targetDeg)) return;
+
+        // turn to that heading in ±stepDeg chunks
+        turnBySteps(heading, targetDeg, stepDeg, turnStepDeg);
+
+        // drive the run length in mm
+        size_t runLenCells = (j - i); // number of steps
+        const bool diagonal = (dx != 0 && dy != 0);
+        const double perStep = diagonal ? (cellMm * std::sqrt(2.0)) : cellMm;
+        driveStraightMm(runLenCells * perStep);//still need to write this one 
+
+        // now we’re aligned to targetDeg
+        heading = targetDeg;
+        i = j;
+    }
+}
+
+// ---------------- example wiring (replace with your robot API) ---------------
+/*
+int main(){
+    // Example path:
+    std::vector<CellXY> path = {{2,2},{3,3},{4,4},{5,5},{6,5},{7,5},{8,6}};
+
+    double cellMm = 50.0;
+    double initialHeadingDeg = 0.0;
+    double stepDeg = 25.0;
+
+    auto turnStepDeg = [](double d){
+        std::cout << "Turn " << d << " deg\n";
+        // robot.turnDegrees(d);
+    };
+    auto driveStraightMm = [](double mm){
+        std::cout << "Drive " << mm << " mm\n";
+        // robot.driveForwardMm(mm);
+    };
+
+    navigatePath(path, cellMm, initialHeadingDeg, stepDeg, turnStepDeg, driveStraightMm);
+}
+*/
+
 // --- Example usage -----------------------------------------------------------
 // Field field(3600, 1800, 50.0);          // 3.6m x 1.8m, 50mm cells
 // auto& grid = field.grid();
@@ -170,3 +312,14 @@ inline void paintPath(Grid& g, const std::vector<std::pair<int,int>>& path) {
 // auto path = pathfind::astar(grid, sx, sy, gx, gy);
 // pathfind::paintPath(grid, path);
 //we can now creat two grids one for the skills and one for 15 sek autonomous mode
+/*so to navigate the bot i can just iterate through this array and check what direction it have to go
+ turn the bot into the right direction drive the distance of the size of the cells and that i am supposed to
+  go into said direction  out of the eight possible directions and checking if the direction of the path changes when it does
+ stop and repeat . 
+while checking in short time frames check my gps coordinates  and convert them to grid coordinates . */
+// 3568 * 3568 feld mm 
+//You just need to wire two callbacks:
+
+//turnStepDeg(deltaDeg) → turn the robot by deltaDeg (positive = CCW)
+
+//driveStraightMm(distanceMm) → drive forward that distance

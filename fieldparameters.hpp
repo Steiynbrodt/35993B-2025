@@ -1,6 +1,6 @@
 #pragma once
 #include <array>
-#include <string_view>
+#include "vex.h"
 #include <cstdint>
 #include <vector>
 #include <queue>
@@ -50,7 +50,7 @@ class Grid {
 public:
     Grid(int cols, int rows)
         : cols_(cols), rows_(rows), data_(static_cast<size_t>(cols) * rows) {
-        if (cols_ <= 0 || rows_ <= 0) throw std::invalid_argument("Grid size must be > 0");
+       // if (cols_ <= 0 || rows_ <= 0) throw std::invalid_argument("Grid size must be > 0");
     }
 
     int cols() const { return cols_; }
@@ -148,8 +148,8 @@ public:
           cols_(static_cast<int>(std::ceil(length_mm / cellSizeMm))),
           rows_(static_cast<int>(std::ceil(width_mm  / cellSizeMm))),
           grid_(cols_, rows_) {
-        if (length_mm <= 0 || width_mm <= 0 || cellSizeMm <= 0.0)
-            throw std::invalid_argument("Invalid field or cell size.");
+       // if (length_mm <= 0 || width_mm <= 0 || cellSizeMm <= 0.0)
+           // throw std::invalid_argument("Invalid field or cell size.");
     }
 
     // Dimensions
@@ -175,7 +175,7 @@ public:
 
     // Cell center (mm) from cell indices
     void cellToMmCenter(int cx, int cy, double& outXmm, double& outYmm) const {
-        if (!grid_.inBounds(cx, cy)) throw std::out_of_range("cellToMmCenter: out of bounds");
+       // if (!grid_.inBounds(cx, cy)) throw std::out_of_range("cellToMmCenter: out of bounds");
         double sx = (cx + 0.5) * cellMm_;
         double sy = (cy + 0.5) * cellMm_;
         outXmm = sx - 0.5 * lengthMm_;

@@ -6,8 +6,7 @@
 #include <fstream>
 #include <limits>
 #include <string>          // <- fehlte
-#include "NAVI_fixed.hpp"
-#include "drive.hpp"
+
 
 using namespace vex;
 
@@ -47,14 +46,19 @@ static void drawNotesScreen(const std::vector<std::string>& notes,
 // Blocks while the operator picks rating + notes.
 // Returns true if confirmed, false if canceled.
 
-
+// ---- nutzt die Helpers ----
+void endofauton(void) {
+  int rating = 0;
+  std::string notes;
+  //(void)getOperatorFeedback(rating, notes);
+}
 
 void hardcoded(void) {}
 void AIMODE(void) {}
 
 void autonomous() {
-  INS.calibrate();
+  
   wait(5, sec);
-  INS.setHeading(90, degrees);
-
+ 
+ 
 }

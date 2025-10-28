@@ -22,7 +22,8 @@ using namespace vex;
 /*---------------------------------------------------------------------------*/
 void pre_auton(void) {
  GPS17.calibrate();
- logGPSData();
+
+ INS.calibrate(std::round(GPS17.heading()));
   // All activities that occur before the competition starts
   // Example: clearing encoders, setting servo positions, ...
 }
@@ -57,8 +58,7 @@ void pre_auton(void) {
 int main() {
   // Set up callbacks for autonomous and driver control periods.
   //test();
-  pre_auton();
-  
+ 
   
   Competition.drivercontrol(drivercontrol);
   Competition.autonomous(autonomous);

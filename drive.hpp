@@ -11,22 +11,26 @@ using namespace vex;
 brain Brain;
 competition Competition;
 controller Controller1 = controller(primary);
-gps GPS17 = gps(PORT15,-100.00, +30.00, mm, +90);
+gps GPS17 = gps(PORT8,-140.00, 55.00, mm, -90);
 
 inertial INS  = inertial(PORT20);
+bool piston1Extended = false;
+vex::digital_out piston1 = vex::digital_out(Brain.ThreeWirePort.A);
+bool piston2Extended = false;
+vex::digital_out piston2 = vex::digital_out(Brain.ThreeWirePort.B);
 
 motor driveMotorLeftOne = motor(PORT19, ratio18_1, false);  
 motor driveMotorLeftTwo = motor(PORT15, ratio18_1, false); 
-motor driveMotorLeftThree = motor(PORT18, ratio18_1, false);
+motor driveMotorLeftThree = motor(PORT6, ratio18_1, false);
 
 
-motor driveMotorRightOne = motor(PORT2, ratio18_1, true); 
+motor driveMotorRightOne = motor(PORT3, ratio18_1, true); 
 motor driveMotorRightTwo = motor(PORT9, ratio18_1, true);
 motor driveMotorRightThree = motor(PORT10, ratio18_1, true);  
 
-motor in1 = motor(PORT1, ratio18_1, false);  
-motor in2 = motor(PORT17 ,ratio18_1, false); 
-motor in3 = motor(PORT14, ratio18_1, false); 
+motor in1 = motor(PORT1, ratio18_1, false);  //intake oben 
+motor in2 = motor(PORT17 ,ratio18_1, false); //mitte
+motor in3 = motor(PORT14, ratio18_1, false); //unten 
 //motor in4 = motor(PORT5, ratio18_1, false); 
 
 motor_group RightDrivetrain = motor_group(driveMotorRightOne, driveMotorRightTwo, driveMotorRightThree);
@@ -52,24 +56,32 @@ void inntake(int intake ){
 
 
  //buttons 
-void R1Pressed()  { in1.setVelocity(100, percent); in1.spin(forward); }
-void R1Released() { in1.stop(coast); }
+void R2Pressed()  {  in3.setVelocity(100, percent); in3.spin(reverse);in2.setVelocity(100, percent); in2.spin(forward);in1.setVelocity(100, percent); in1.spin(forward);}
+void R2Released() {  in3.stop(coast);in2.stop(coast); in1.stop(coast); }
 
-void R2Pressed()  { in1.setVelocity(100, percent); in1.spin(reverse); }
-void R2Released() { in1.stop(coast); }
+void L1Pressed()  {in3.setVelocity(-100, percent); in3.spin(reverse); in1.setVelocity(100, percent); in1.spin(forward);in2.setVelocity(100, percent); in2.spin(forward);}
+void L1Released() {   in3.stop(coast);in2.stop(coast); in1.stop(coast);}
 
-void L1Pressed()  { in3.setVelocity(100, percent); in3.spin(reverse); } // was -100% in your code
-void L1Released() { in3.stop(coast); }
+void R1Pressed()  { in3.setVelocity(100, percent); in3.spin(forward); in1.setVelocity(0, percent); in1.spin(reverse);in2.setVelocity(100, percent); in2.spin(reverse);} // was -100% in your code
+void R1Released() {  in3.stop(coast);in2.stop(coast); in1.stop(coast); }
 
-void L2Pressed()  { in3.setVelocity(100, percent); in3.spin(forward); }
-void L2Released() { in3.stop(coast); }
+void L2Pressed()  { in3.setVelocity(100, percent); in3.spin(forward); in1.setVelocity(100, percent); in1.spin(reverse);in2.setVelocity(100, percent); in2.spin(forward);}
+void L2Released() { in3.stop(coast);in2.stop(coast); in1.stop(coast); }
 
 
 
-void RrPressed()  { in2.setVelocity(100, percent); in2.spin(forward); }
-void RrReleased() { in2.stop(coast); }
+void RrPressed()  { while (true) {
+        if (Controller1.ButtonRight.pressing()) {
+            wait(20, msec); // Simple debounce
+            piston1Extended = !piston1Extended; // Toggle state
+            piston1.set(piston1Extended);
+            wait(300, msec); // Wait to prevent multiple toggles
+        }
+        wait(20, msec); // Prevent excessive loop cycling
+    } }
 
-void yPressed()  { in2.setVelocity(100, percent); in2.spin(reverse); }
+
+void yPressed()  { /*in2.setVelocity(100, percent); in2.spin(reverse);*/ }
 void yReleased() { in2.stop(coast); }
 
 
@@ -91,27 +103,37 @@ void drivercontrol(void) {
 
   // If you want Right + Y to control in2 (as in your code)
   Controller1.ButtonRight.pressed(RrPressed);
-  Controller1.ButtonRight.released(RrReleased);
+  
 
   Controller1.ButtonY.pressed(yPressed);
-  Controller1.ButtonY.released(yReleased);
-
+  
   // If you actually wanted Up (instead of Right), use this instead:
   // Controller1.ButtonUp.pressed(RrPressed);
   // Controller1.ButtonUp.released(RrReleased);
 
 while (true) {
   
-    double leftm  = Controller1.Axis3.position() - Controller1.Axis1.position() / 2.0;
-    double rightm = Controller1.Axis3.position() + Controller1.Axis1.position() / 2.0;
-
+    double leftm  = Controller1.Axis3.position() + Controller1.Axis1.position();
+    double rightm = Controller1.Axis3.position() - Controller1.Axis1.position();
+   
     LeftDrivetrain.spin(reverse, leftm, percent);
     RightDrivetrain.spin(reverse, rightm, percent);
 
     wait(20, msec); 
     
   
-}}
+}
+}
+    
+    
+ 
+  
+  
+  
+
+ 
+  
+
 
 
 
