@@ -4,7 +4,7 @@
 #include "vex.h"
 #include <limits>
 #include <utility>
-#include "drive.hpp"
+
 #include "fieldparameters.hpp"
 
 // --- A* (Octile) on your Grid -----------------------------------------------
@@ -201,23 +201,52 @@ inline void turnBySteps(double& currentHeadingDeg,
         err = wrap180(targetHeadingDeg - currentHeadingDeg);
     }
 }
-void  turnStepDeg(double angle){
-    INS.setRotation(0,degrees);
- if(angle >0){
+void turnStepDeg(double angle) {
  
-  while( std::abs(INS.rotation()) != angle){
-    LeftDrivetrain.spin(forward, 5, percent);
-    RightDrivetrain.spin(reverse,5 , percent);
-  }
- }
- else if (angle<0){
-     while( std::abs(INS.rotation()) != angle){
-    LeftDrivetrain.spin(reverse, 5, percent);
-    RightDrivetrain.spin(forward,5 , percent);
-  }
- }
+  double Kp = 0.3;//parameter for better tuning 
   
+    INS.resetRotation(); 
+
+  if (angle > 0) {
+    // spin until we are within tolerance below the target
+        while(true)
+    {
+    double gError = angle - INS.rotation(deg);
+    if( std::abs(gError) < 3)  // we will stop within 3 deg from target
+    {
+       break;
+    }
+    double speed = gError * Kp;
+     
+     LeftDrivetrain.spin(reverse, speed, pct);
+    RightDrivetrain.spin(reverse, speed, pct);
 }
+  } else if (angle < 0) {
+    while(true)
+    {
+    double gError = angle - INS.rotation(deg);
+    if( std::abs(gError) < 3)  // we will stop within 3 deg from target
+    {
+       break;
+    }
+    double speed = gError * Kp;
+     
+     LeftDrivetrain.spin(forward, speed, pct);
+    RightDrivetrain.spin(reverse, speed, pct);
+}}
+    FullDrivetrain.stop();
+}
+
+void ReCalibrateGyro()
+{
+  INS.calibrate();
+  while( INS.isCalibrating() )
+  { wait(10,msec); }
+}
+
+
+
+
 // -------- main routine --------
 // cellMm: size of a grid cell in millimeters
 // stepDeg: size of your discrete turn steps (e.g., 25°)

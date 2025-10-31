@@ -6,7 +6,7 @@
 #include <fstream>
 #include <limits>
 #include <string>          // <- fehlte
-
+#include "test.hpp"
 
 using namespace vex;
 
@@ -57,8 +57,7 @@ void hardcoded(void) {}
 void AIMODE(void) {}
 
 void autonomous() {
+  turndegtest();
   
-  wait(5, sec);
- 
  
 }
