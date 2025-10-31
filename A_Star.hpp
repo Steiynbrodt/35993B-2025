@@ -4,7 +4,7 @@
 #include "vex.h"
 #include <limits>
 #include <utility>
-
+#include "driveforward.hpp"
 #include "fieldparameters.hpp"
 
 // --- A* (Octile) on your Grid -----------------------------------------------
@@ -159,11 +159,7 @@ inline void paintPath(Grid& g, const std::vector<std::pair<int,int>>& path) {
 struct CellXY { int x, y; };
 
 // -------- helpers --------
-inline double wrap180(double a){
-    while (a >  180.0) a -= 360.0;
-    while (a < -180.0) a += 360.0;
-    return a;
-}
+
 
 // Map 8-neighbor (dx,dy) to a compass angle in degrees.
 // We use the standard math convention: +x = 0°, +y = +90°.
@@ -202,39 +198,36 @@ inline void turnBySteps(double& currentHeadingDeg,
     }
 }
 void turnStepDeg(double angle) {
- 
-  double Kp = 0.3;//parameter for better tuning 
-  
-    INS.resetRotation(); 
+  const double Kp      = 0.35;  // tune
+  const double tolDeg  = 2.0;   // stop within ±2°
+  const double minPct  = 8;     // overcome stiction
+  const double maxPct  = 50;    // cap speed
+  const int    timeout = 2500;  // ms safety
 
-  if (angle > 0) {
-    // spin until we are within tolerance below the target
-        while(true)
-    {
-    double gError = angle - INS.rotation(deg);
-    if( std::abs(gError) < 3)  // we will stop within 3 deg from target
-    {
-       break;
-    }
-    double speed = gError * Kp;
-     
-     LeftDrivetrain.spin(reverse, speed, pct);
-    RightDrivetrain.spin(reverse, speed, pct);
-}
-  } else if (angle < 0) {
-    while(true)
-    {
-    double gError = angle - INS.rotation(deg);
-    if( std::abs(gError) < 3)  // we will stop within 3 deg from target
-    {
-       break;
-    }
-    double speed = gError * Kp;
-     
-     LeftDrivetrain.spin(forward, speed, pct);
-    RightDrivetrain.spin(reverse, speed, pct);
-}}
-    FullDrivetrain.stop();
+  INS.setRotation(0, degrees);
+  wait(50, msec);
+
+  int t = 0;
+  while (t < timeout) {
+    double err = angle - INS.rotation(degrees); // signed error
+    if (fabs(err) <= tolDeg) break;
+
+    double cmd = Kp * err;                      // signed turn command
+    // clamp & ensure minimum magnitude
+    if (cmd >  maxPct) cmd =  maxPct;
+    if (cmd < -maxPct) cmd = -maxPct;
+    if (fabs(cmd) < minPct) cmd = (cmd >= 0 ? minPct : -minPct);
+
+    // Mix: positive cmd = turn left (CCW); negative cmd = turn right (CW)
+    LeftDrivetrain.spin(fwd,  -cmd, pct);
+    RightDrivetrain.spin(fwd,  cmd, pct);
+
+    wait(10, msec);
+    t += 10;
+  }
+
+  LeftDrivetrain.stop(brake);
+  RightDrivetrain.stop(brake);
 }
 
 void ReCalibrateGyro()

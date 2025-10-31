@@ -53,7 +53,9 @@ void endofauton(void) {
   //(void)getOperatorFeedback(rating, notes);
 }
 
-void hardcoded(void) {}
+void hardcoded(void) {
+  driveStraightMm(1000);
+}
 void AIMODE(void) {}
 
 void autonomous() {

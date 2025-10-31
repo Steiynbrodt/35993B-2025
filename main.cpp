@@ -1,7 +1,7 @@
 #include "vex.h"
 #include "../vex.h"
 #include "drive.hpp"
-
+   
 #include "autonomus.hpp"
 
 using namespace vex;
@@ -22,8 +22,9 @@ using namespace vex;
 /*---------------------------------------------------------------------------*/
 void pre_auton(void) {
  GPS17.calibrate();
-
- INS.calibrate(std::round(GPS17.heading()));
+ double thing = GPS17.heading();
+ INS.setHeading(thing,deg);
+ INS.calibrate();
   // All activities that occur before the competition starts
   // Example: clearing encoders, setting servo positions, ...
 }
@@ -56,6 +57,7 @@ void pre_auton(void) {
 // Main will set up the competition functions and callbacks.
 //
 int main() {
+ 
   // Set up callbacks for autonomous and driver control periods.
   //test();
  
