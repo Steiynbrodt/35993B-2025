@@ -8,12 +8,63 @@
 #include <string>          // <- fehlte
 #include "test.hpp"
 
+// --- Globals (single definitions) ---
+int autonMode = 0;
+const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS" };
+constexpr int AUTON_COUNT = sizeof(AUTON_NAMES) / sizeof(AUTON_NAMES[0]);
 
-using namespace vex;
-int autonMode = 0; 
-// ---- Helpers auf Datei-Ebene (nicht in einer anderen Funktion!) ----
+static void renderAuton(int mode, bool showPrompt = true) {
+  Controller1.Screen.clearScreen();
+  Controller1.Screen.setCursor(1, 1); Controller1.Screen.print("Auton:");
+  Controller1.Screen.setCursor(2, 1);
+  // simple arrows with no printf formats
+  if (mode == 0) Controller1.Screen.print("  "); else Controller1.Screen.print("^ ");
+  Controller1.Screen.print(AUTON_NAMES[mode]);
+  if (mode == AUTON_COUNT - 1) Controller1.Screen.print("  "); else Controller1.Screen.print(" v");
+  Controller1.Screen.setCursor(3, 1);
+  Controller1.Screen.print(showPrompt ? "Up/Down change | A confirm" : "Locked in");
+}
 
+// Lock flag to avoid accidental re-entry later
+static bool autonLocked = false;
 
+void pre_auton() {
+  // --- Time-boxed selector that does not depend on disabled state ---
+  // Works with old 2-position switch (always enabled) and proper field control.
+  const int MENU_MS = 6000;  // adjust window (ms) as you like
+  vex::timer t;
+
+  bool prevUp=false, prevDown=false, prevA=false;
+  bool confirmed=false;
+
+  renderAuton(autonMode, true);
+
+  while (!confirmed && t.time(vex::msec) < MENU_MS && !autonLocked) {
+    bool up   = Controller1.ButtonUp.pressing();
+    bool down = Controller1.ButtonDown.pressing();
+    bool a    = Controller1.ButtonA.pressing();
+
+    bool changed = false;
+
+    if (up && !prevUp)  { autonMode = (autonMode + AUTON_COUNT - 1) % AUTON_COUNT; changed = true; Controller1.rumble("."); }
+    if (down && !prevDown) { autonMode = (autonMode + 1) % AUTON_COUNT; changed = true; Controller1.rumble("."); }
+    if (a && !prevA)    { confirmed = true; Controller1.rumble("-"); }
+
+    if (changed)   renderAuton(autonMode, true);
+    if (confirmed) renderAuton(autonMode, false);
+
+    prevUp = up; prevDown = down; prevA = a;
+    wait(25, vex::msec);
+  }
+
+  // Auto-lock after timeout too (keeps selection; no movement happened)
+  autonLocked = true;
+
+  // Safe defaults (no motion, only resets)
+  piston1.set(false);
+  piston2.set(false);
+  piston3.set(false);
+}
 /*static void drawRatingScreen(int rating) {
   Brain.Screen.clearScreen();
   Brain.Screen.setFont(monoXXL);
@@ -124,8 +175,24 @@ void hardcodedL(void) {
   intakeouthigh(30);
 
 }
-void AIMODE(void) {}
-
+void AIMODE(void) {
+  // --- Example usage -----------------------------------------------------------
+// Field field(3600, 1800, 50.0);          // 3.6m x 1.8m, 50mm cells
+// auto& grid = field.grid();
+// // obstacles (in mm):
+// field.addRectMm(0, 0, 400, 400);        // 40x40cm block at center
+// field.addEdgeMargin(100.0);             // 10cm safety band
+// field.inflateByRadius(150.0);           // robot radius 15cm
+//
+// // start/goal in cell coords:
+// int sx = 2, sy = 2;
+// int gx = grid.cols()-3, gy = grid.rows()-3;
+// grid.setCell(sx, sy, Cellstate::START);
+// grid.setCell(gx, gy, Cellstate::GOAL);
+//
+// auto path = pathfind::astar(grid, sx, sy, gx, gy);
+// pathfind::paintPath(grid, path);
+}
 void autonomous() {
   switch (autonMode) {
     case 0: hardcodedR();  break;
