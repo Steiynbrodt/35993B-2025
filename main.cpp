@@ -20,14 +20,7 @@ using namespace vex;
 /*  function is only called once after the V5 has been powered on and        */
 /*  not every time that the robot is disabled.                               */
 /*---------------------------------------------------------------------------*/
-void pre_auton(void) {
- GPS17.calibrate();
- double thing = GPS17.heading();
- INS.setHeading(thing,deg);
- INS.calibrate();
-  // All activities that occur before the competition starts
-  // Example: clearing encoders, setting servo positions, ...
-}
+
 
 /*---------------------------------------------------------------------------*/
 /*                                                                           */
@@ -39,7 +32,36 @@ void pre_auton(void) {
 /*  You must modify the code to add your own robot specific commands here.   */
 /*---------------------------------------------------------------------------*/
 
+  // 0 = Left, 1 = Right, 2 = Skills
+const int AUTON_COUNT = 3;
 
+void displayAuton() {
+  Brain.Screen.clearScreen();
+  Brain.Screen.setCursor(1,1);
+  Brain.Screen.print("Selected: ");
+  if (autonMode == 0) Brain.Screen.print("LEFT");
+  if (autonMode == 1) Brain.Screen.print("RIGHT");
+  if (autonMode == 2) Brain.Screen.print("SKILLS");
+}
+
+void pre_auton() {
+  displayAuton();
+  Brain.Screen.print("\nUse X/Y to change, A to confirm");
+
+  while(!Competition.isEnabled()) {   // only while disabled (safe)
+    if (Controller1.ButtonX.pressing()) {   // previous
+      autonMode = (autonMode - 1 + AUTON_COUNT) % AUTON_COUNT;
+      displayAuton();
+      wait(300, msec);
+    }
+    if (Controller1.ButtonY.pressing()) {   // next
+      autonMode = (autonMode + 1) % AUTON_COUNT;
+      displayAuton();
+      wait(300, msec);
+    }
+    wait(20, msec);
+  }
+}
 
 /*---------------------------------------------------------------------------*/
 /*                                                                           */
@@ -61,7 +83,7 @@ int main() {
   // Set up callbacks for autonomous and driver control periods.
   //test();
  
-  
+  pre_auton();
   Competition.drivercontrol(drivercontrol);
   Competition.autonomous(autonomous);
   

@@ -8,8 +8,9 @@
 #include <string>          // <- fehlte
 #include "test.hpp"
 
-using namespace vex;
 
+using namespace vex;
+int autonMode = 0; 
 // ---- Helpers auf Datei-Ebene (nicht in einer anderen Funktion!) ----
 
 
@@ -48,18 +49,88 @@ static void drawNotesScreen(const std::vector<std::string>& notes,
 
 // ---- nutzt die Helpers ----
 void endofauton(void) {
-  int rating = 0;
-  std::string notes;
-  //(void)getOperatorFeedback(rating, notes);
+   LeftDrivetrain.stop(coast);
+  RightDrivetrain.stop(coast);
+
+}
+void intaketankfor(int number) {
+  for (int count = 0; count < number; count++) {
+    R1Pressed();
+    wait(100, msec);
+  }
+  R1Released();
 }
 
-void hardcoded(void) {
-  driveStraightMm(1000);
+void intakeouthigh(int number) {
+  for (int count = 0; count < number; count++) {
+    L1Pressed();
+    wait(100, msec);
+  }
+  L1Released();
+}
+
+void intakeoutmid(int number) {
+  for (int count = 0; count < number; count++) {
+    L2Pressed();
+    wait(100, msec);
+  }
+  L2Released();
+}
+void intakeoutlow(int number) {
+  for (int count = 0; count < number; count++) {
+    R2Pressed();
+    wait(100, msec);
+  }
+  R2Released();
+}
+//hard auton
+void hardcodedR(void) {
+   piston1.set(true);
+  piston2.set(true);
+  
+
+  driveStraightMm(400);
+  turnStepDeg(90);
+  driveStraightMm(600);
+  turnStepDeg(92);
+   piston2.set(false);
+  driveStraightMm(300);
+  intaketankfor(30);
+  driveStraightMm(-300);
+  turnStepDeg(180);
+  piston2.set(true);
+  piston1.set(false);
+  driveStraightMm(200);
+  intakeouthigh(30);
+
+}
+void hardcodedL(void) {
+   piston1.set(true);
+  piston2.set(true);
+  
+
+  driveStraightMm(400);
+  turnStepDeg(-90);
+  driveStraightMm(600);
+  turnStepDeg(-92);
+   piston2.set(false);
+  driveStraightMm(300);
+  intaketankfor(30);
+  driveStraightMm(-300);
+  turnStepDeg(180);
+  piston2.set(true);
+  piston1.set(false);
+  driveStraightMm(200);
+  intakeouthigh(30);
+
 }
 void AIMODE(void) {}
 
 void autonomous() {
-  turndegtest();
-  
- 
+  switch (autonMode) {
+    case 0: hardcodedR();  break;
+    case 1: hardcodedL(); break;
+    case 2: AIMODE(); break;
+  }
 }
+
