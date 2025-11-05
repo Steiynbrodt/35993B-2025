@@ -33,35 +33,14 @@ using namespace vex;
 /*---------------------------------------------------------------------------*/
 
   // 0 = Left, 1 = Right, 2 = Skills
-const int AUTON_COUNT = 3;
 
-void displayAuton() {
-  Brain.Screen.clearScreen();
-  Brain.Screen.setCursor(1,1);
-  Brain.Screen.print("Selected: ");
-  if (autonMode == 0) Brain.Screen.print("LEFT");
-  if (autonMode == 1) Brain.Screen.print("RIGHT");
-  if (autonMode == 2) Brain.Screen.print("SKILLS");
-}
 
-void pre_auton() {
-  displayAuton();
-  Brain.Screen.print("\nUse X/Y to change, A to confirm");
+// Globals (place near top of file)
 
-  while(!Competition.isEnabled()) {   // only while disabled (safe)
-    if (Controller1.ButtonX.pressing()) {   // previous
-      autonMode = (autonMode - 1 + AUTON_COUNT) % AUTON_COUNT;
-      displayAuton();
-      wait(300, msec);
-    }
-    if (Controller1.ButtonY.pressing()) {   // next
-      autonMode = (autonMode + 1) % AUTON_COUNT;
-      displayAuton();
-      wait(300, msec);
-    }
-    wait(20, msec);
-  }
-}
+
+
+
+
 
 /*---------------------------------------------------------------------------*/
 /*                                                                           */
@@ -83,10 +62,10 @@ int main() {
   // Set up callbacks for autonomous and driver control periods.
   //test();
  
-  pre_auton();
+  
   Competition.drivercontrol(drivercontrol);
   Competition.autonomous(autonomous);
-  
+  pre_auton();
  
   
   
