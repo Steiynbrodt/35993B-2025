@@ -193,71 +193,83 @@ void hardcodedL(void) {
 
 }
 void AIMODE(void) {
-  // --- Example usage -----------------------------------------------------------
-// Field field(3600, 1800, 50.0);          // 3.6m x 1.8m, 50mm cells
-// auto& grid = field.grid();
-// // obstacles (in mm):
-// field.addRectMm(0, 0, 400, 400);        // 40x40cm block at center
-// field.addEdgeMargin(100.0);             // 10cm safety band
-// field.inflateByRadius(150.0);           // robot radius 15cm
-//
-// // start/goal in cell coords:
-// int sx = 2, sy = 2;
-// int gx = grid.cols()-3, gy = grid.rows()-3;
-// grid.setCell(sx, sy, Cellstate::START);
-// grid.setCell(gx, gy, Cellstate::GOAL);
-//
-// auto path = pathfind::astar(grid, sx, sy, gx, gy);
-// pathfind::paintPath(grid, path);
-
-    // Build your 3.6m x 3.6m field, 50mm cells, obstacles, margins, inflation, etc.
+    // ---------- 1) Build field (in mm) ----------
+    // 3.6m x 3.6m field, 50mm grid cells  → 72 x 72 grid
     Field field(3600, 3600, 50.0);
     auto& grid = field.grid();
 
-    // e.g. edges + inflation:
-    field.addEdgeMargin(100.0);
-    field.inflateByRadius(150.0);
-
-    // 1) Read start from GPS
+    // ---------- 2) Get start from GPS (on empty grid) ----------
+    // Convert GPS (mm) → start cell + heading
     StartPoseCell sp = getStartFromGPS(field);
-    if (!sp.valid) { Brain.Screen.print("GPS start invalid"); return; }
+    if (!sp.valid) {
+        Brain.Screen.clearScreen();
+        Brain.Screen.print("GPS start invalid");
+        return;
+    }
+
+    // ---------- 3) Define obstacles in mm ----------
+    // Safety band 10cm around edges
+   addFieldObstaclesWithSmallX(field);
+
+    // Mark start cell (overwrites whatever inflation did at that cell)
     grid.setCell(sp.sx, sp.sy, Cellstate::START);
 
-    // 2) Choose/set a goal cell (example: near top right)
-    //int gx = grid.cols() - 3, gy = grid.rows() - 3;
-    int gx = 10; int gy = 10 ;
-    
+    // ---------- 4) Set goal in mm ----------
+    // Example goal: somewhere in the south-west part of the field.
+    // You can change these two numbers only, everything else updates.
+    const double goalXmm = -1275.0;   // X in mm (left/right, 0 is center)
+    const double goalYmm = -1275.0;   // Y in mm (forward/back, 0 is center)
+
+    int gx = 0, gy = 0;
+    if (!field.mmToCell(goalXmm, goalYmm, gx, gy)) {
+        Brain.Screen.clearScreen();
+        Brain.Screen.print("Goal outside field");
+        return;
+    }
     grid.setCell(gx, gy, Cellstate::GOAL);
-    // Debug: show grid coords
-      Brain.Screen.clearScreen();
-      Brain.Screen.setCursor(1, 1);
-      Brain.Screen.print("S:(%d,%d) G:(%d,%d)", sp.sx, sp.sy, gx, gy);
 
-      // Convert to mm to see world positions
-      double sXmm, sYmm, gXmm, gYmm;
-      field.cellToMmCenter(sp.sx, sp.sy, sXmm, sYmm);
-      field.cellToMmCenter(gx, gy, gXmm, gYmm);
+    // ---------- 5) Debug info on Brain ----------
+    Brain.Screen.clearScreen();
+    Brain.Screen.setCursor(1, 1);
+    Brain.Screen.print("S:(%d,%d) G:(%d,%d)", sp.sx, sp.sy, gx, gy);
 
-      Brain.Screen.setCursor(2, 1);
-      Brain.Screen.print("Smm:(%.0f,%.0f)", sXmm, sYmm);
+    double sXmm, sYmm, gXmm, gYmm;
+    field.cellToMmCenter(sp.sx, sp.sy, sXmm, sYmm);
+    field.cellToMmCenter(gx, gy, gXmm, gYmm);
 
-      Brain.Screen.setCursor(3, 1);
-      Brain.Screen.print("Gmm:(%.0f,%.0f)", gXmm, gYmm);
+    Brain.Screen.setCursor(2, 1);
+    Brain.Screen.print("Smm:(%.0f,%.0f)", sXmm, sYmm);
+    Brain.Screen.setCursor(3, 1);
+    Brain.Screen.print("Gmm:(%.0f,%.0f)", gXmm, gYmm);
 
-    // 3) A* path
-    auto pathPairs = pathfind::astar(grid, sp.sx, sp.sy, gx, gy);      // :contentReference[oaicite:11]{index=11}
-    if (pathPairs.empty()) { Brain.Screen.print("No path"); return; }
+    // ---------- 6) Run A* ----------
+    auto pathPairs = pathfind::astar(grid, sp.sx, sp.sy, gx, gy);
+    if (pathPairs.empty()) {
+        Brain.Screen.setCursor(4, 1);
+        Brain.Screen.print("No path");
+        return;
+    }
 
-    // 4) Convert to CellXY for navigatePath
-    std::vector<CellXY> path; path.reserve(pathPairs.size());
-    for (auto& p : pathPairs) path.push_back({p.first, p.second});
+    // Convert to CellXY for navigatePath
+    std::vector<CellXY> path;
+    path.reserve(pathPairs.size());
+    for (auto& p : pathPairs)
+        path.push_back({ p.first, p.second });
 
-    // 5) Drive it (your turn & drive primitives already exist)         // :contentReference[oaicite:12]{index=12} :contentReference[oaicite:13]{index=13}
-    navigatePath(path, field.cellMm(), sp.headingDeg, 25.0, turnStepDeg, driveStraightMm);
+    // ---------- 7) Drive the path ----------
+    navigatePath(
+        path,
+        field.cellMm(),     // cell size in mm
+        sp.headingDeg,      // starting heading from GPS
+        25.0,               // max heading step per segment (deg) – tune
+        turnStepDeg,        // your turn primitive
+        driveStraightMm     // your drive primitive
+    );
 
-    // (optional) paint the path for debugging
-    pathfind::paintPath(grid, pathPairs);                              // :contentReference[oaicite:14]{index=14}
-} 
+    // ---------- 8) Optional: mark the path for debugging ----------
+    pathfind::paintPath(grid, pathPairs);
+}
+
 
 void autonomous() {
   switch (autonMode) {

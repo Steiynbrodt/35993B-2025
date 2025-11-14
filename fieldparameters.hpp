@@ -235,3 +235,38 @@ private:
         return mmToCell(cx, cy, outX, outY);
     }
 };
+constexpr double BLOCK_RADIUS_MM = 100.0;
+
+inline void addFieldObstaclesWithSmallX(Field& field) {
+    // ---- Walls ----
+    field.addEdgeMargin(100.0);
+
+    // ---- Long-goal bars ----
+    field.addRectMm(0.0,  1200.0, 800.0, 200.0);   // top bar
+    field.addRectMm(0.0, -1200.0, 800.0, 200.0);   // bottom bar
+
+    // ---- Corner bays ----
+    field.addRectMm(-1700.0, 0.0, 300.0, 800.0);   // left bay
+    field.addRectMm( 1700.0, 0.0, 300.0, 800.0);   // right bay
+
+    // ---- Small diagonal X (±300mm) ----
+    constexpr double R = 120.0;   // disk radius in mm
+
+    const double centers[][2] = {
+        {-300.0, -300.0},
+        {-300.0,  300.0},
+        {-150.0, -150.0},
+        {-150.0,  150.0},
+        {   0.0,    0.0},
+        { 150.0,  150.0},
+        { 150.0, -150.0},
+        { 300.0,  300.0},
+        { 300.0, -300.0}
+    };
+
+    for (auto &c : centers)
+        field.addDiskMm(c[0], c[1], R);
+
+    // Important:
+    // DO NOT call field.inflateByRadius() when using these precise shapes!
+}
