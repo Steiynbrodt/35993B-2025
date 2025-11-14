@@ -7,63 +7,70 @@
 #include <limits>
 #include <string>          // <- fehlte
 #include "test.hpp"
+#include "localization.hpp"
 
-// --- Globals (single definitions) ---
-int autonMode = 0;
-const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS" };
-constexpr int AUTON_COUNT = sizeof(AUTON_NAMES) / sizeof(AUTON_NAMES[0]);
+// ---- Globals ----
 
-static void renderAuton(int mode, bool showPrompt = true) {
-  Controller1.Screen.clearScreen();
-  Controller1.Screen.setCursor(1, 1); Controller1.Screen.print("Auton:");
-  Controller1.Screen.setCursor(2, 1);
-  // simple arrows with no printf formats
-  if (mode == 0) Controller1.Screen.print("  "); else Controller1.Screen.print("^ ");
-  Controller1.Screen.print(AUTON_NAMES[mode]);
-  if (mode == AUTON_COUNT - 1) Controller1.Screen.print("  "); else Controller1.Screen.print(" v");
-  Controller1.Screen.setCursor(3, 1);
-  Controller1.Screen.print(showPrompt ? "Up/Down change | A confirm" : "Locked in");
+// --- Auton data ---
+
+static int autonMode = 0;
+static const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS" };
+static constexpr int AUTON_COUNT = sizeof(AUTON_NAMES) / sizeof(AUTON_NAMES[0]);
+
+// --- Helper to draw the menu ---
+static inline void brainDraw() {
+  Brain.Screen.clearScreen();
+  Brain.Screen.setFont(monoM);
+  Brain.Screen.setPenColor(white);
+
+  Brain.Screen.printAt(20, 40,  false, "Select Auton (tap)");
+  Brain.Screen.printAt(20, 100, false, "^  Prev");
+  Brain.Screen.printAt(20, 140, false, "Mode: %s", AUTON_NAMES[autonMode]);
+  Brain.Screen.printAt(20, 180, false, "v  Next");
+
+  Brain.Screen.drawRectangle(250, 120, 110, 44, vex::color(20, 200, 20));
+  Brain.Screen.printAt(275, 150, false, " OK ");
 }
 
-// Lock flag to avoid accidental re-entry later
-static bool autonLocked = false;
+// --- Touch utility ---
+static inline bool inRect(int x, int y, int rx, int ry, int rw, int rh) {
+  return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+}
 
-void pre_auton() {
-  // --- Time-boxed selector that does not depend on disabled state ---
-  // Works with old 2-position switch (always enabled) and proper field control.
-  const int MENU_MS = 6000;  // adjust window (ms) as you like
-  vex::timer t;
+// --- Auton selector (no time limit) ---
+static inline void pre_auton() {
+  brainDraw();
 
-  bool prevUp=false, prevDown=false, prevA=false;
-  bool confirmed=false;
+  while (true) {
+    if (Brain.Screen.pressing()) {
+      const int x = Brain.Screen.xPosition();
+      const int y = Brain.Screen.yPosition();
 
-  renderAuton(autonMode, true);
+      // Tap upper area → previous
+      if (inRect(x, y, 10, 80, 220, 40)) {
+        autonMode = (autonMode + AUTON_COUNT - 1) % AUTON_COUNT;
+        brainDraw();
+        wait(180, msec);
+      }
+      // Tap lower area → next
+      else if (inRect(x, y, 10, 170, 220, 40)) {
+        autonMode = (autonMode + 1) % AUTON_COUNT;
+        brainDraw();
+        wait(180, msec);
+      }
+      // Tap OK → finalize
+      else if (inRect(x, y, 250, 120, 110, 44)) {
+        break;
+      }
 
-  while (!confirmed && t.time(vex::msec) < MENU_MS && !autonLocked) {
-    bool up   = Controller1.ButtonUp.pressing();
-    bool down = Controller1.ButtonDown.pressing();
-    bool a    = Controller1.ButtonA.pressing();
-
-    bool changed = false;
-
-    if (up && !prevUp)  { autonMode = (autonMode + AUTON_COUNT - 1) % AUTON_COUNT; changed = true; Controller1.rumble("."); }
-    if (down && !prevDown) { autonMode = (autonMode + 1) % AUTON_COUNT; changed = true; Controller1.rumble("."); }
-    if (a && !prevA)    { confirmed = true; Controller1.rumble("-"); }
-
-    if (changed)   renderAuton(autonMode, true);
-    if (confirmed) renderAuton(autonMode, false);
-
-    prevUp = up; prevDown = down; prevA = a;
-    wait(25, vex::msec);
+      // Wait until finger lifted
+      while (Brain.Screen.pressing()) wait(10, msec);
+    }
+    wait(20, msec);
   }
 
-  // Auto-lock after timeout too (keeps selection; no movement happened)
-  autonLocked = true;
-
-  // Safe defaults (no motion, only resets)
-  piston1.set(false);
-  piston2.set(false);
-  piston3.set(false);
+  Brain.Screen.clearScreen();
+  Brain.Screen.printAt(20, 40, false, "Final Auton: %d (%s)", autonMode, AUTON_NAMES[autonMode]);
 }
 /*static void drawRatingScreen(int rating) {
   Brain.Screen.clearScreen();
@@ -143,15 +150,20 @@ void hardcodedR(void) {
   driveStraightMm(400);
   turnStepDeg(90);
   driveStraightMm(600);
-  turnStepDeg(92);
-   piston2.set(false);
-  driveStraightMm(300);
-  intaketankfor(30);
-  driveStraightMm(-300);
-  turnStepDeg(180);
+  turnStepDeg(84);
+  piston2.set(false);
+  //driveStraightMm(350);
+  FullDrivetrain.spin(forward,-50,pct);
+  wait(500, msec);
+  FullDrivetrain.stop(coast);
+  intaketankfor(10);
+  
+  driveStraightMm(-350);
   piston2.set(true);
   piston1.set(false);
-  driveStraightMm(200);
+  turnStepDeg(180);
+  
+  driveStraightMm(167);
   intakeouthigh(30);
 
 }
@@ -163,15 +175,20 @@ void hardcodedL(void) {
   driveStraightMm(400);
   turnStepDeg(-90);
   driveStraightMm(600);
-  turnStepDeg(-92);
+  turnStepDeg(-84);
    piston2.set(false);
-  driveStraightMm(300);
-  intaketankfor(30);
-  driveStraightMm(-300);
-  turnStepDeg(180);
+   //driveStraightMm(350);
+  FullDrivetrain.spin(forward,-50,pct);
+  wait(500, msec);
+  FullDrivetrain.stop(coast);
+  intaketankfor(10);
+  
+  driveStraightMm(-350);
   piston2.set(true);
   piston1.set(false);
-  driveStraightMm(200);
+  turnStepDeg(180);
+  
+  driveStraightMm(167);
   intakeouthigh(30);
 
 }
@@ -192,11 +209,60 @@ void AIMODE(void) {
 //
 // auto path = pathfind::astar(grid, sx, sy, gx, gy);
 // pathfind::paintPath(grid, path);
-}
+
+    // Build your 3.6m x 3.6m field, 50mm cells, obstacles, margins, inflation, etc.
+    Field field(3600, 3600, 50.0);
+    auto& grid = field.grid();
+
+    // e.g. edges + inflation:
+    field.addEdgeMargin(100.0);
+    field.inflateByRadius(150.0);
+
+    // 1) Read start from GPS
+    StartPoseCell sp = getStartFromGPS(field);
+    if (!sp.valid) { Brain.Screen.print("GPS start invalid"); return; }
+    grid.setCell(sp.sx, sp.sy, Cellstate::START);
+
+    // 2) Choose/set a goal cell (example: near top right)
+    //int gx = grid.cols() - 3, gy = grid.rows() - 3;
+    int gx = 10; int gy = 10 ;
+    
+    grid.setCell(gx, gy, Cellstate::GOAL);
+    // Debug: show grid coords
+      Brain.Screen.clearScreen();
+      Brain.Screen.setCursor(1, 1);
+      Brain.Screen.print("S:(%d,%d) G:(%d,%d)", sp.sx, sp.sy, gx, gy);
+
+      // Convert to mm to see world positions
+      double sXmm, sYmm, gXmm, gYmm;
+      field.cellToMmCenter(sp.sx, sp.sy, sXmm, sYmm);
+      field.cellToMmCenter(gx, gy, gXmm, gYmm);
+
+      Brain.Screen.setCursor(2, 1);
+      Brain.Screen.print("Smm:(%.0f,%.0f)", sXmm, sYmm);
+
+      Brain.Screen.setCursor(3, 1);
+      Brain.Screen.print("Gmm:(%.0f,%.0f)", gXmm, gYmm);
+
+    // 3) A* path
+    auto pathPairs = pathfind::astar(grid, sp.sx, sp.sy, gx, gy);      // :contentReference[oaicite:11]{index=11}
+    if (pathPairs.empty()) { Brain.Screen.print("No path"); return; }
+
+    // 4) Convert to CellXY for navigatePath
+    std::vector<CellXY> path; path.reserve(pathPairs.size());
+    for (auto& p : pathPairs) path.push_back({p.first, p.second});
+
+    // 5) Drive it (your turn & drive primitives already exist)         // :contentReference[oaicite:12]{index=12} :contentReference[oaicite:13]{index=13}
+    navigatePath(path, field.cellMm(), sp.headingDeg, 25.0, turnStepDeg, driveStraightMm);
+
+    // (optional) paint the path for debugging
+    pathfind::paintPath(grid, pathPairs);                              // :contentReference[oaicite:14]{index=14}
+} 
+
 void autonomous() {
   switch (autonMode) {
-    case 0: hardcodedR();  break;
-    case 1: hardcodedL(); break;
+    case 0: hardcodedL();  break;
+    case 1: hardcodedR(); break;
     case 2: AIMODE(); break;
   }
 }

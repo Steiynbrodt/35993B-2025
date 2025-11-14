@@ -1,0 +1,134 @@
+How your code works (quick doc)
+A* pathfinding (8-connected grid with octile cost)
+
+Node & priority:
+Node stores (x,y) and f=h+g. The priority queue (NodeCmp) is a min-heap on f, with a tiebreak on smaller h to prefer nodes closer to goal in a straight line (helps reduce zig-zags).
+
+Walkability & corner-cutting:
+traversable() allows only FREE, START, GOAL.
+canStep() blocks stepping onto obstacles and also forbids diagonal “corner-cutting”: for a diagonal move, both side orthogonals must be traversable.
+
+Heuristic:
+octile() uses the 8-neighbor metric: max(dx,dy) + (sqrt(2)-1) * min(dx,dy) (implemented as (M-m) + m*sqrt(2)). It’s admissible and consistent for 8-connected grids with costs 1 (cardinal) and √2 (diagonal).
+
+State arrays:
+
+gScore[n]: best cost from start to cell n (initialized to ∞).
+
+fScore[n]: current best g + h for n.
+
+parent[n]: backpointers for path reconstruction.
+
+inOpen[n]: tiny optimization flag.
+
+Main loop:
+
+Pop the best node cur by smallest f.
+
+If it’s the goal → reconstruct path via parent.
+
+If the popped f is stale (doesn’t match fScore), skip.
+
+For each of 8 moves, if canStep() passes, compute tentative g'.
+If g' < gScore[next], update parent, gScore, recompute h, set f, and push.
+
+Reconstruction & painting:
+reconstructPath() walks parent back to start and reverses.
+paintPath() marks cells along the path (preserves START/GOAL).
+
+Heading math & motion primitives
+
+Direction → compass angle:
+directionAngleDeg(dx,dy, outDeg) maps 8 neighbor directions to degrees with math-style axes: +x = 0°, +y = +90°. West is 180° (or -180°), south is -90°, etc.
+
+Stepwise turning controller:
+turnBySteps(currentHeading, targetHeading, stepDeg, turnStepDeg) closes the heading error by repeatedly calling your callback with ±stepDeg chunks until within half a step. wrap180() keeps angles in (-180°, 180°].
+
+Low-level turn (example):
+turnStepDeg(double angle) is a simple proportional controller:
+
+Zero INS rotation, then loop until error within tolDeg.
+
+cmd = clamp(Kp*err, ±maxPct) and ensure a minPct to overcome stiction.
+
+Mix left/right drivetrain speeds with opposite signs to turn on the spot.
+
+Safety timeout, then brake both sides.
+
+Gyro recalibration:
+ReCalibrateGyro() runs INS.calibrate() and waits until done. Call before precise turns.
+
+Path execution on the field
+
+navigatePath(...):
+Takes a list of grid cells (CellXY) and:
+
+Run-length compresses straight segments with same (dx,dy).
+
+Converts that direction to a target heading via directionAngleDeg.
+
+Turns to that heading using turnBySteps(...) and your turn callback.
+
+Drives the whole run at once using your drive callback.
+
+Distance per cell is cellMm for cardinal moves, cellMm*√2 for diagonals.
+
+Repeats for each segment until the goal.
+
+Why compression matters:
+Fewer stops/turns → smoother, faster runs, less accumulated error. Turning once per segment rather than once per cell reduces oscillations.
+
+Wiring it all together (typical flow)
+
+Build Field/Grid, mark obstacles, inflate margins, set START/GOAL.
+
+Run pathfind::astar(...) → vector of (x,y) cells.
+
+Optionally paintPath(...) for visualization/logging.
+
+Convert the cell list to std::vector<CellXY> if needed.
+
+Call navigatePath(...) with:
+
+stepDeg (e.g., 20–30° is a good start),
+
+your turnStepDeg callback (the P-controller above is fine),
+
+your driveStraightMm function (drive forward a precise distance).// --- Get start position from GPS and show it on the Brain --------------------
+// Assumes you have a global VEX gps sensor named `GPS` and an inertial `INS`.
+// If your GPS var is named differently, pass it in or rename below.
+
+struct PoseMM { double x_mm, y_mm, heading_deg; };
+
+// Convert current GPS pose to grid cell (centered grid, (0|0) at field center).
+// `cellMm` = grid cell size in millimeters (e.g., 50.0)
+inline CellXY captureStartFromGPS(double cellMm, PoseMM* outPose = nullptr) {
+  // Read pose in mm and heading from INS (or GPS if you prefer yaw from GPS)
+  const double x = GPS.xPosition(mm);
+  const double y = GPS.yPosition(mm);
+  double heading = 0.0;
+  // Use the INS for a smooth heading; wrap to (-180, 180]
+  heading = wrap180(INS.rotation(degrees));
+
+  if (outPose) *outPose = PoseMM{x, y, heading};
+
+  // Convert mm → grid cells assuming origin (0,0) is the field center
+  // and +x to the right, +y forward (same convention you use elsewhere).
+  const int gx = static_cast<int>(std::lround(x / cellMm));
+  const int gy = static_cast<int>(std::lround(y / cellMm));
+
+  // Display nicely on Brain
+  Brain.Screen.clearScreen();
+  Brain.Screen.setFont(mono20);
+  Brain.Screen.setCursor(2, 2);
+  Brain.Screen.print("Start (mm):  x=%0.1f  y=%0.1f  hdg=%0.1f", x, y, heading);
+  Brain.Screen.setCursor(4, 2);
+  Brain.Screen.print("Start (grid): X=%d  Y=%d  (cell=%0.1f mm)", gx, gy, cellMm);
+
+  return CellXY{gx, gy};
+}
+
+// Example usage:
+// PoseMM startPose{};
+// CellXY startCell = captureStartFromGPS(50.0, &startPose);
+// grid.setCell(startCell.x, startCell.y, Cellstate::START);

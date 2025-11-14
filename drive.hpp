@@ -18,10 +18,12 @@ digital_out piston1(Brain.ThreeWirePort.A);
 digital_out piston2(Brain.ThreeWirePort.B);
 digital_out piston3(Brain.ThreeWirePort.D);
 
+
 // State tracking (so toggles work everywhere)
 bool piston1Extended = false;
 bool piston2Extended = false;
 bool piston3Extended = false;
+bool piston4Extended = false;
 
 // ---------- Deterministic setters (great for autonomous) ----------
 void setPiston1(bool extended) { piston1Extended = extended; piston1.set(extended); }
@@ -36,10 +38,12 @@ void retractPiston2() { setPiston2(false); }
 void extendPiston3() { setPiston3(true); }
 void retractPiston3() { setPiston3(false); }
 
+
 // ---------- Toggles (callable from anywhere, incl. autonomous) ----------
 void togglePiston1() { setPiston1(!piston1Extended); }
 void togglePiston2() { setPiston2(!piston2Extended); }
 void togglePiston3() { setPiston3(!piston3Extended); }
+
 
 motor driveMotorLeftOne = motor(PORT19, ratio18_1, false);  
 motor driveMotorLeftTwo = motor(PORT15, ratio18_1, false); 
@@ -114,6 +118,8 @@ void drivercontrol(void) {
    Controller1.ButtonRight.pressed(togglePiston1); // A
   Controller1.ButtonY.pressed(togglePiston2);     // B
   Controller1.ButtonLeft.pressed(togglePiston3);  // D
+   
+   
 
 while (true) {
   
