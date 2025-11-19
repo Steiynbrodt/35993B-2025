@@ -65,8 +65,8 @@ Key files (simplified):
 
 ```text
 A_Star.hpp                       # Grid-based A* pathfinding
-NAVI.hpp                         # High-level navigation interface (NAVI function)
-NAVI_fixed.hpp                   # Frozen/experimental version of NAVI
+NAVI.hpp                         # High-level navigation interface (NAVI function) deprecated
+NAVI_fixed.hpp                   # Frozen/experimental version of NAVI deprecated
 auton.hpp                        # Main autonomous routines
 autonomus.hpp                    # Additional autonomous helpers
 buttons.hpp                      # Controller button mappings & related logic
