@@ -6,7 +6,7 @@ This repository contains the full navigation, localization and autonomous logic 
 Core features include:
 
 - Grid-based pathfinding (A* on a discretized field)
-- High-level navigation interface (`NAVI.hpp`)
+
 - GPS + inertial-based localization
 - Autonomous routines and driver-assist helpers
 - Utility modules for field parameters, buttons, and testing
@@ -33,7 +33,7 @@ Core features include:
 
 ### Motion / Drive
 
-- High-level `NAVI(...)` entry point for “drive to (x, y)” behavior (`NAVI.hpp`)
+
 - Low-level motion helpers in `drive.hpp` / `driveforward.hpp`:
   - Straight driving with speed ramping
   - Turning with heading control
@@ -45,8 +45,7 @@ Core features include:
   - `auton.hpp`
   - `autonomus.hpp`
 - Typical structure:
-  - Set initial pose
-  - Call `NAVI(targetXmm, targetYmm)` multiple times
+  - use turn and driveforward
   - Run mechanism actions (intake, launcher, etc.) in between movements
 
 ### Utilities
@@ -215,19 +214,10 @@ Ensures values remain within safe limits.
 
 Used for stability or emergency fallback.
 
-▶️ vex.h
-
-Auto-generated hardware configuration file.
-
-Declares motors, sensors, ports, and directions.
-
-Managed by VEXcode device configuration.
-
-Should not be edited manually.
 
 🔧 Building & Deploying
 
-Open the project in VEXcode Pro V5.
+Open the project in vscode
 
 Ensure the hardware configuration in vex.h matches the actual robot.
 
@@ -235,7 +225,7 @@ Press Build.
 
 Download to the V5 Brain via USB or controller tether.
 
-🧪 Autonomous Development Notes
+🧪 Autonomous Development Notes(with out A*)
 
 Autonomous must be added/modified in auton.hpp.
 
@@ -243,7 +233,7 @@ Movement is performed using functions in drive.hpp.
 
 Localization is optional but available via localization.hpp.
 
-No symbolic pathfinding (NAVI) is included; all movement is hardcoded.
+ all movement is hardcoded.
 
 Example general auton structure:
 
