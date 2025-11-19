@@ -1,134 +1,373 @@
-How your code works (quick doc)
-A* pathfinding (8-connected grid with octile cost)
+# 35993B – 2024/2025 Robot Code Documentation (Updated)
 
-Node & priority:
-Node stores (x,y) and f=h+g. The priority queue (NodeCmp) is a min-heap on f, with a tiebreak on smaller h to prefer nodes closer to goal in a straight line (helps reduce zig-zags).
+This document describes the architecture and main modules of the Team 35993B
+robot code for the 2024/2025 VEX V5 season.
 
-Walkability & corner-cutting:
-traversable() allows only FREE, START, GOAL.
-canStep() blocks stepping onto obstacles and also forbids diagonal “corner-cutting”: for a diagonal move, both side orthogonals must be traversable.
+It reflects the current state of the repository:
 
-Heuristic:
-octile() uses the 8-neighbor metric: max(dx,dy) + (sqrt(2)-1) * min(dx,dy) (implemented as (M-m) + m*sqrt(2)). It’s admissible and consistent for 8-connected grids with costs 1 (cardinal) and √2 (diagonal).
+- `autonomus.hpp` contains the **working autonomous routines**.
+- The old `auton.hpp` file was experimental / broken and has been removed.
+- The NAVI navigation layer (`NAVI.hpp` / `NAVI_fixed.hpp`) has been removed.
+- `A_Star.hpp` still exists for grid-based pathfinding experiments but is not
+  part of the main competition auton path (which is fully hardcoded).
 
-State arrays:
+This file is meant for team members and contributors who want to understand
+how the project is structured and where to add or modify behavior.
 
-gScore[n]: best cost from start to cell n (initialized to ∞).
+-------------------------------------------------------------------------------
+1. Project Overview
+-------------------------------------------------------------------------------
 
-fScore[n]: current best g + h for n.
+The project is organized into separate modules for:
 
-parent[n]: backpointers for path reconstruction.
+- **Competition logic** (entry point and mode switching)
+- **Autonomous routines** (hardcoded drives + turns)
+- **Movement primitives** (drive and turn)
+- **Localization** (GPS + inertial-based pose estimation)
+- **Field geometry** (tile size, coordinate system)
+- **Controller input** (buttons and mappings)
+- **Pathfinding experiments** (A* grid search)
+- **Helper and safety utilities**
 
-inOpen[n]: tiny optimization flag.
+The primary goal is a reliable, understandable, and tunable codebase that can
+be used by the whole team.
 
-Main loop:
+-------------------------------------------------------------------------------
+2. File Overview
+-------------------------------------------------------------------------------
 
-Pop the best node cur by smallest f.
+The main files in the repository:
 
-If it’s the goal → reconstruct path via parent.
+    A_Star.hpp
+    CODE_OF_CONDUCT.md
+    CONTRIBUTING.md
+    LICENSE
+    README.md
+    SECURITY.md
+    VEX Navigation System (NAVI) - Documenta
+    autonomus.hpp
+    buttons.hpp
+    documentation.txt   (this file)
+    drive.hpp
+    driveforward.hpp
+    emergencyswapminmax.hpp
+    fieldparameters.hpp
+    helpers.hpp
+    localization.hpp
+    main.cpp
+    test.hpp
+    vex.h
 
-If the popped f is stale (doesn’t match fScore), skip.
+Below is what each of these code-related files is responsible for.
 
-For each of 8 moves, if canStep() passes, compute tentative g'.
-If g' < gScore[next], update parent, gScore, recompute h, set f, and push.
+-------------------------------------------------------------------------------
+3. Core Code Modules
+-------------------------------------------------------------------------------
 
-Reconstruction & painting:
-reconstructPath() walks parent back to start and reverses.
-paintPath() marks cells along the path (preserves START/GOAL).
+3.1 main.cpp
+-------------
+Program entry point and competition framework setup.
 
-Heading math & motion primitives
+- Calls `vexcodeInit()` to initialize all motors and sensors defined in `vex.h`.
+- Registers VEX competition callbacks:
+    - `void autonomous();`
+    - `void usercontrol();`
+- Contains the basic loop that runs during driver control.
 
-Direction → compass angle:
-directionAngleDeg(dx,dy, outDeg) maps 8 neighbor directions to degrees with math-style axes: +x = 0°, +y = +90°. West is 180° (or -180°), south is -90°, etc.
+`main.cpp` should remain small and only coordinate which high-level functions
+are called in each mode (auton vs driver).
 
-Stepwise turning controller:
-turnBySteps(currentHeading, targetHeading, stepDeg, turnStepDeg) closes the heading error by repeatedly calling your callback with ±stepDeg chunks until within half a step. wrap180() keeps angles in (-180°, 180°].
+-------------------------------------------------------------------------------
 
-Low-level turn (example):
-turnStepDeg(double angle) is a simple proportional controller:
+3.2 autonomus.hpp
+------------------
+**Main autonomous module – this is where the working auton lives.**
 
-Zero INS rotation, then loop until error within tolDeg.
+Responsibilities:
 
-cmd = clamp(Kp*err, ±maxPct) and ensure a minPct to overcome stiction.
+- Implements one or more **autonomous routines**.
+- Routines are fully **hardcoded** sequences of:
+    - `driveForward(...)`
+    - `turnToHeading(...)`
+    - Mechanism actions (e.g. intake, launcher) and `wait(...)`.
+- Uses units:
+    - Distances in **millimeters**
+    - Angles in **degrees**
 
-Mix left/right drivetrain speeds with opposite signs to turn on the spot.
+Typical pattern inside an auton function:
 
-Safety timeout, then brake both sides.
+    // Example structure (names may differ in the actual file)
+    void autonomous() {
+        // Optionally set initial pose if we rely on localization:
+        // setPose_mm(startX, startY, startHeading);
 
-Gyro recalibration:
-ReCalibrateGyro() runs INS.calibrate() and waits until done. Call before precise turns.
+        driveForward(600);
+        turnToHeading(90);
+        driveForward(300);
 
-Path execution on the field
+        // Mechanism actions in between movements
+        // intake.spin(fwd);
+        // wait(400, msec);
+        // intake.stop();
+    }
 
-navigatePath(...):
-Takes a list of grid cells (CellXY) and:
+Important notes:
 
-Run-length compresses straight segments with same (dx,dy).
+- `autonomus.hpp` is the **canonical place** for competition auton.
+- Any previous `auton.hpp` file was experimental and is no longer used.
+- If you want a new auton path, add a new function in `autonomus.hpp` and
+  hook it up via `autonomous()` in `main.cpp` or via a selection mechanism.
 
-Converts that direction to a target heading via directionAngleDeg.
+-------------------------------------------------------------------------------
 
-Turns to that heading using turnBySteps(...) and your turn callback.
+3.3 drive.hpp
+--------------
+Low-level motion control for the drivetrain.
 
-Drives the whole run at once using your drive callback.
+Provides the main movement primitives used everywhere else, typically:
 
-Distance per cell is cellMm for cardinal moves, cellMm*√2 for diagonals.
+- `driveForward(distance_mm)`
+    - Drives forward a specified distance in millimeters.
+    - Handles speed, acceleration, deceleration, and stopping logic.
+- `turnToHeading(angle_deg)`
+    - Rotates the robot to a target heading in degrees.
+    - Uses inertial / gyro data for heading feedback.
 
-Repeats for each segment until the goal.
+Also responsible for:
 
-Why compression matters:
-Fewer stops/turns → smoother, faster runs, less accumulated error. Turning once per segment rather than once per cell reduces oscillations.
+- Basic control-loop behavior (e.g. proportional or PID-style corrections).
+- Tolerances for “close enough” distance and angle.
+- Helper functions for combined movements, if implemented.
 
-Wiring it all together (typical flow)
+All autonomous movement should be built on these primitives.
 
-Build Field/Grid, mark obstacles, inflate margins, set START/GOAL.
+-------------------------------------------------------------------------------
 
-Run pathfind::astar(...) → vector of (x,y) cells.
+3.4 driveforward.hpp
+---------------------
+Supporting module for straight-line motion.
 
-Optionally paintPath(...) for visualization/logging.
+- Contains more specific logic for forward movement (e.g. advanced PID).
+- May be used internally by `drive.hpp` or directly by test routines.
+- Focused on making forward drive consistent and tunable.
 
-Convert the cell list to std::vector<CellXY> if needed.
+If you need to adjust how “forward” behaves in general, this is a place to look.
 
-Call navigatePath(...) with:
+-------------------------------------------------------------------------------
 
-stepDeg (e.g., 20–30° is a good start),
+3.5 localization.hpp
+---------------------
+Pose estimation module, tracking:
 
-your turnStepDeg callback (the P-controller above is fine),
+- `x` position in millimeters
+- `y` position in millimeters
+- `heading` in degrees
 
-your driveStraightMm function (drive forward a precise distance).// --- Get start position from GPS and show it on the Brain --------------------
-// Assumes you have a global VEX gps sensor named `GPS` and an inertial `INS`.
-// If your GPS var is named differently, pass it in or rename below.
+Typical functionality:
 
-struct PoseMM { double x_mm, y_mm, heading_deg; };
+- `setPose_mm(x, y, heading)` – reset the current estimated pose.
+- Periodic updates using:
+    - GPS sensor (position)
+    - Inertial sensor (heading)
+- Helper functions to:
+    - Get the current pose
+    - Apply offsets based on `fieldparameters.hpp`
 
-// Convert current GPS pose to grid cell (centered grid, (0|0) at field center).
-// `cellMm` = grid cell size in millimeters (e.g., 50.0)
-inline CellXY captureStartFromGPS(double cellMm, PoseMM* outPose = nullptr) {
-  // Read pose in mm and heading from INS (or GPS if you prefer yaw from GPS)
-  const double x = GPS.xPosition(mm);
-  const double y = GPS.yPosition(mm);
-  double heading = 0.0;
-  // Use the INS for a smooth heading; wrap to (-180, 180]
-  heading = wrap180(INS.rotation(degrees));
+Localization may be used by autonomus routines or experimental pathfinding.
 
-  if (outPose) *outPose = PoseMM{x, y, heading};
+-------------------------------------------------------------------------------
 
-  // Convert mm → grid cells assuming origin (0,0) is the field center
-  // and +x to the right, +y forward (same convention you use elsewhere).
-  const int gx = static_cast<int>(std::lround(x / cellMm));
-  const int gy = static_cast<int>(std::lround(y / cellMm));
+3.6 fieldparameters.hpp
+------------------------
+Stores all relevant field geometry and coordinate system constants.
 
-  // Display nicely on Brain
-  Brain.Screen.clearScreen();
-  Brain.Screen.setFont(mono20);
-  Brain.Screen.setCursor(2, 2);
-  Brain.Screen.print("Start (mm):  x=%0.1f  y=%0.1f  hdg=%0.1f", x, y, heading);
-  Brain.Screen.setCursor(4, 2);
-  Brain.Screen.print("Start (grid): X=%d  Y=%d  (cell=%0.1f mm)", gx, gy, cellMm);
+Usually includes:
 
-  return CellXY{gx, gy};
-}
+- Tile size (e.g. 600 mm per tile)
+- Field dimensions (width / height in mm or tiles)
+- Origin and axis directions (where (0,0) is, which way X/Y increase)
+- Optional obstacle or zone definitions (if used elsewhere)
 
-// Example usage:
-// PoseMM startPose{};
-// CellXY startCell = captureStartFromGPS(50.0, &startPose);
-// grid.setCell(startCell.x, startCell.y, Cellstate::START);
+Centralizing this keeps conversions consistent across the codebase.
+
+-------------------------------------------------------------------------------
+
+3.7 buttons.hpp
+----------------
+Controller input mapping module.
+
+Responsible for:
+
+- Mapping controller buttons to actions (e.g. mechanism toggles, auton selection).
+- Handling one-time triggers vs held buttons.
+- Any pre-match auton selection logic (if implemented with the controller).
+
+Driver control behavior related to buttons should live here instead of scattering
+button reads across multiple files.
+
+-------------------------------------------------------------------------------
+
+3.8 helpers.hpp
+----------------
+Generic helper functions.
+
+Can include:
+
+- Math utilities (clamping, interpolation, conversions).
+- Simple debug functions or wrappers for printing.
+- Small general-purpose routines shared across modules.
+
+Anything that does not belong to a specific subsystem but is reused can be placed here.
+
+-------------------------------------------------------------------------------
+
+3.9 emergencyswapminmax.hpp
+----------------------------
+Safety and clamping helper module.
+
+Typical responsibilities:
+
+- Ensuring a value stays within a given `[min, max]` range.
+- Swapping misordered min/max values so they remain valid.
+- Providing emergency bounds for inputs to motor commands or algorithms.
+
+It’s most relevant for making sure that tuning mistakes or out-of-range
+values don’t cause unpredictable behavior.
+
+-------------------------------------------------------------------------------
+
+3.10 vex.h
+-----------
+Auto-generated by VEXcode.
+
+- Defines all motors, sensors, controller objects, and ports.
+- Includes configuration such as gear ratios and reversed directions.
+
+**Do not edit this file by hand.**  
+Use the VEXcode “Devices” UI to add/remove/change hardware.
+
+-------------------------------------------------------------------------------
+4. Pathfinding and Experiments
+-------------------------------------------------------------------------------
+
+4.1 A_Star.hpp
+---------------
+This file contains a **grid-based A\* pathfinding implementation**.
+
+Conceptually:
+
+- The field is discretized into a grid.
+- Each cell can be free or blocked.
+- A\* search computes a path from a start cell to a goal cell.
+- The result is a list of grid waypoints.
+
+Current status:
+
+- The competition auton in `autonomus.hpp` is **fully hardcoded** and does
+  **not** use A\* or NAVI.
+- `A_Star.hpp` remains available for experiments, future features or separate
+  test programs (e.g. via `test.hpp`).
+
+If you want to experiment with automatic routing:
+
+- Use `A_Star.hpp` in a separate test function or in `test.hpp`.
+- Combine A\* output with drive primitives from `drive.hpp` to follow the path.
+
+-------------------------------------------------------------------------------
+
+4.2 VEX Navigation System (NAVI) – Documentation
+-------------------------------------------------
+The file named:
+
+    VEX Navigation System (NAVI) - Documenta
+
+contains additional notes and design ideas for a previous NAVI-based navigation
+system that built on A\* pathfinding and a higher-level `NAVI(...)` interface.
+
+Current status:
+
+- NAVI-related headers (`NAVI.hpp`, `NAVI_fixed.hpp`) have been removed.
+- The document is kept as **reference / legacy documentation**.
+- It can inform any future attempt to reintroduce a higher-level navigation API
+  using `A_Star.hpp`.
+
+-------------------------------------------------------------------------------
+5. Test and Utility Code
+-------------------------------------------------------------------------------
+
+5.1 test.hpp
+-------------
+This file is intended for:
+
+- Experimental code
+- Small standalone tests
+- Quick checks of new ideas without touching competition code
+
+Typical uses:
+
+- Prototyping with `A_Star.hpp`
+- Trying new drive or PID values
+- Testing localization behavior
+
+Anything in `test.hpp` should be treated as non-critical / experimental and
+should not be required for competition behavior.
+
+-------------------------------------------------------------------------------
+6. Autonomous Behavior – Current Model
+-------------------------------------------------------------------------------
+
+- The **only** active auton logic is in `autonomus.hpp`.
+- All movement is **hardcoded** using turn + drive + mechanisms.
+- `A_Star.hpp` and old NAVI concepts are not part of the live auton.
+
+General auton pattern:
+
+- Optionally set initial pose using `localization.hpp`.
+- Use `driveForward(mm)` and `turnToHeading(deg)` from `drive.hpp`.
+- Insert mechanism commands and waits at the right points.
+
+When adding or editing auton:
+
+- Work in `autonomus.hpp`.
+- Ensure `autonomous()` in `main.cpp` calls the correct autonomus function.
+- Test thoroughly on-field.
+
+-------------------------------------------------------------------------------
+7. Safety Notes
+-------------------------------------------------------------------------------
+
+Because this project runs on a real robot:
+
+- Always test new movement code in a safe environment.
+- Do not stand close to the robot while testing new autonomous steps.
+- Verify motor directions after hardware changes in `vex.h`.
+- Use conservative speeds until behavior is verified.
+- If something behaves unexpectedly, stop the robot and check the logic.
+
+-------------------------------------------------------------------------------
+8. History and Notes
+-------------------------------------------------------------------------------
+
+- **Old `auton.hpp`**  
+  A file named `auton.hpp` previously existed but contained non-working or
+  experimental code. It has been removed from the main branch to prevent
+  confusion. All working auton code is now in `autonomus.hpp`.
+
+- **NAVI Removal**  
+  The NAVI system (`NAVI.hpp`, `NAVI_fixed.hpp`) was removed to simplify the
+  codebase. The A\*-based navigation concept is preserved in `A_Star.hpp` and
+  the NAVI documentation file for future experiments.
+
+-------------------------------------------------------------------------------
+9. Last Update
+-------------------------------------------------------------------------------
+
+- Date: 2025-11-19
+- Updated to reflect:
+  - `autonomus.hpp` as the main autonomous module
+  - Removal of `auton.hpp` and NAVI headers
+  - Current file list and responsibilities
+
+-------------------------------------------------------------------------------
+
+End of documentation.
