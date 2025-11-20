@@ -164,24 +164,27 @@ struct CellXY { int x, y; };
 
 // Map 8-neighbor (dx,dy) to a compass angle in degrees.
 // We use the standard math convention: +x = 0°, +y = +90°.
+// Map 8-neighbor (dx,dy) to a field-relative angle where
+// 0° = +Y (forward on the field, i.e. "north").
+// Positive angles rotate CCW, same convention as GPS/INS.
 inline bool directionAngleDeg(int dx, int dy, double& outDeg){
-    // normalize to -1,0,1
     dx = (dx > 0) - (dx < 0);
     dy = (dy > 0) - (dy < 0);
     if (dx == 0 && dy == 0) return false;
 
-    if      (dx ==  1 && dy ==  0) outDeg =   0.0;   // E
-    else if (dx ==  1 && dy ==  1) outDeg =  45.0;   // NE
-    else if (dx ==  0 && dy ==  1) outDeg =  90.0;   // N
-    else if (dx == -1 && dy ==  1) outDeg = 135.0;   // NW
-    else if (dx == -1 && dy ==  0) outDeg = 180.0;   // W (same as -180)
-    else if (dx == -1 && dy == -1) outDeg = -135.0;  // SW
-    else if (dx ==  0 && dy == -1) outDeg =  -90.0;  // S
-    else if (dx ==  1 && dy == -1) outDeg =  -45.0;  // SE
+    if      (dx ==  0 && dy ==  1) outDeg =   0.0;   // +Y (forward)
+    else if (dx ==  1 && dy ==  1) outDeg =  45.0;   // forward-right
+    else if (dx ==  1 && dy ==  0) outDeg =  90.0;   // +X (right)
+    else if (dx ==  1 && dy == -1) outDeg = 135.0;   // back-right
+    else if (dx ==  0 && dy == -1) outDeg = 180.0;   // -Y (back) = ±180°
+    else if (dx == -1 && dy == -1) outDeg = -135.0;  // back-left
+    else if (dx == -1 && dy ==  0) outDeg = -90.0;   // -X (left)
+    else if (dx == -1 && dy ==  1) outDeg = -45.0;   // forward-left
     else return false;
 
     return true;
 }
+
 
 // Turn by multiple ±stepDeg increments to reach target
 inline void turnBySteps(double& currentHeadingDeg,
@@ -249,7 +252,7 @@ inline void navigatePath(const std::vector<CellXY>& path,
                          double initialHeadingDeg,
                          double stepDeg,
                          const std::function<void(double)>& turnStepDeg,
-                         const std::function<void(double)>& driveStraightMm)
+                         const std::function<void(double)>& driveStraightMm_nav)
 {
     if (path.size() < 2) return;
 
@@ -287,7 +290,7 @@ inline void navigatePath(const std::vector<CellXY>& path,
         size_t runLenCells = (j - i); // number of steps
         const bool diagonal = (dx != 0 && dy != 0);
         const double perStep = diagonal ? (cellMm * std::sqrt(2.0)) : cellMm;
-        driveStraightMm(runLenCells * perStep);//still need to write this one 
+        driveStraightMm_nav(runLenCells * perStep);//still need to write this one 
 
         // now we’re aligned to targetDeg
         heading = targetDeg;

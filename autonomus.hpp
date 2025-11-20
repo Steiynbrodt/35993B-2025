@@ -14,7 +14,7 @@
 // --- Auton data ---
 
 static int autonMode = 0;
-static const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS" };
+static const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS", "CALIB" };
 static constexpr int AUTON_COUNT = sizeof(AUTON_NAMES) / sizeof(AUTON_NAMES[0]);
 
 // --- Helper to draw the menu ---
@@ -274,8 +274,8 @@ void AIMODE(void) {
 void autonomous() {
   switch (autonMode) {
     case 0: hardcodedL();  break;
-    case 1: hardcodedR(); break;
-    case 2: AIMODE(); break;
+    case 1: hardcodedR();  break;
+    case 2: AIMODE();      break;
+    case 3: calibrateDriveForward(1000.0, 4); break;
   }
 }
-

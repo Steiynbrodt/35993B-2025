@@ -1,5 +1,8 @@
+#pragma once
 #include "vex.h"
-#include <cmath>  // fabs
+#include <cmath>      // fabs
+#include <algorithm>  // std::max, std::min
+
 using namespace vex;
 
 // ======================================================================
@@ -69,15 +72,22 @@ static constexpr int    settleTimeMs = 120;   // Must remain in tolerance for th
 // ======================================================================
 // mmPerRot converts motor shaft turns -> linear mm traveled at the wheel.
 // gearRatio = (wheel revs) per (motor rev). For reductions: < 1.0
-static constexpr double wheelDiamMm = 61.11105;        // Measured tire OD (mm)
-static constexpr double gearRatio   = 1.6666;          // Example ratio (wheel/motor)
-static constexpr double PI          = 3.14159265358979323846;
-static constexpr double mmPerRot    = PI * wheelDiamMm * gearRatio;
+static constexpr double PI = 3.14159265358979323846;
+
+// Laufzeit-Parameter (kalibrierbar)
+inline double g_wheelDiamMm = 61.11105;      // Startwert: gemessener Reifen-Durchmesser (mm)
+inline double g_gearRatio   = 1.6666;        // wheel rev / motor rev
+inline double g_mmPerRot    = PI * g_wheelDiamMm * g_gearRatio;
+
+// Getter, damit alles über eine Stelle läuft
+inline double mmPerRot() { return g_mmPerRot; }
 
 // Provided by your project elsewhere:
 extern motor_group LeftDrivetrain;
 extern motor_group RightDrivetrain;
 extern inertial     INS;
+extern gps          GPS;          // GPS-Sensor für Kalibrierung
+void ReCalibrateGyro();           // deine bereits existierende Funktion
 
 // ======================================================================
 // Timeout estimation via simple simulation (defensive programming)
@@ -96,7 +106,7 @@ static int estimateTimeoutMs(double distanceMm){
 
   // Approximate max linear speed (mm/s) from %command at 100%
   const double vMax =
-    (motorRpm * gearRatio * PI * wheelDiamMm / 60.0) * speedFudge;
+    (motorRpm * g_gearRatio * PI * g_wheelDiamMm / 60.0) * speedFudge;
 
   // State for simulation (not the real robot)
   double sMm = 0.0;            // synthetic traveled distance in "forward" sense
@@ -132,14 +142,14 @@ static int estimateTimeoutMs(double distanceMm){
     fwd = lastFwd + step;
 
     // Map %command → linear speed estimate (ignore heading in sim)
-    const double v = (fabs(fwd) / 100.0) * vMax; // mm/s
+    const double v = (std::fabs(fwd) / 100.0) * vMax; // mm/s
 
     // Integrate simulated distance in the sign of fwd
     sMm += v * dt * (fwd >= 0 ? +1.0 : -1.0);
 
     // If within tolerance, return with settle margin and small slack
     const double remaining = distanceMm - sMm * fwdSign;
-    if (fabs(remaining) <= settleTolMm)
+    if (std::fabs(remaining) <= settleTolMm)
       return tMs + settleTimeMs + 200; // extra 200ms slack
 
     lastErr = err;
@@ -180,7 +190,7 @@ void driveStraightMm(double distanceMm){
     const double L = LeftDrivetrain.position(turns);
     const double R = RightDrivetrain.position(turns);
     const double avgRev = 0.5 * (L + R);             // average motor revs
-    const double traveledMm = avgRev * mmPerRot * fwdSign; // convert to +mm forward
+    const double traveledMm = avgRev * mmPerRot() * fwdSign; // convert to +mm forward
 
     // Distance PID terms
     const double err  = distanceMm - traveledMm;     // remaining distance (mm)
@@ -226,7 +236,7 @@ void driveStraightMm(double distanceMm){
     // ---------------- settle detection ------------------
     // Must remain inside both distance and heading tolerances for
     // settleTimeMs continuously to declare "done".
-    if (fabs(err) <= settleTolMm && fabs(head) <= settleTolDeg){
+    if (std::fabs(err) <= settleTolMm && std::fabs(head) <= settleTolDeg){
       within += 10;
       if (within >= settleTimeMs) break;
     } else {
@@ -246,4 +256,189 @@ void driveStraightMm(double distanceMm){
   wait(150, timeUnits::msec);
   LeftDrivetrain.stop(coast);
   RightDrivetrain.stop(coast);
+}
+
+// Navigation-optimized straight drive:
+// - same PID + heading hold as driveStraightMm
+// - BUT: no backward correction once target is reached/passed
+// - looser, distance-dependent tolerance for faster path following
+void driveStraightMm_nav(double distanceMm){
+  // Dynamic timeout from the same simulator
+  const int timeoutMs_dyn = estimateTimeoutMs(distanceMm);
+
+  // Same mechanical convention: forward = motors spin REVERSE
+  const double fwdSign = -1.0;
+
+  // Hold current heading as reference = 0°
+  INS.setRotation(0, rotationUnits::deg);
+  wait(50, timeUnits::msec);
+
+  LeftDrivetrain.resetPosition();
+  RightDrivetrain.resetPosition();
+
+  double lastErr = distanceMm;
+  double integ   = 0.0;
+  double lastFwd = 0.0;
+  int    within  = 0;
+  int    tMs     = 0;
+
+  // Navigation: tolerance scales a bit with distance, but is never crazy:
+  // at least 10mm, at most 50mm, ~10% of commanded distance in between.
+  const double baseTolMm = std::max(
+      10.0,
+      std::min(50.0, std::fabs(distanceMm) * 0.10)
+  );
+
+  while (tMs < timeoutMs_dyn){
+    // --- feedback: distance ---
+    const double L = LeftDrivetrain.position(turns);
+    const double R = RightDrivetrain.position(turns);
+    const double avgRev = 0.5 * (L + R);
+    const double traveledMm = avgRev * mmPerRot() * fwdSign;
+
+    const double err  = distanceMm - traveledMm;  // remaining mm
+
+    // --------- NAV-SPECIFIC OVERSHOOT GUARD ----------
+    // For navigation, once we've reached or passed the distance,
+    // we do NOT attempt to "pull back" with reverse power. We just stop.
+    if ((distanceMm > 0 && err <= 0) ||
+        (distanceMm < 0 && err >= 0)) {
+      break;
+    }
+    // -------------------------------------------------
+
+    const double derr = (err - lastErr) / 0.01;   // mm/s (10ms)
+
+    // Only integrate near the target window, like your original
+    if (err < 50 && err > -50) integ += err * 0.01;
+    else                       integ = 0.0;
+
+    // Distance PID
+    double fwd = kP_dist * err + kI_dist * integ + kD_dist * derr;
+
+    // --- heading hold PD ---
+    const double head = wrap180(0.0 - INS.rotation(rotationUnits::deg));
+    const double rate = INS.gyroRate(axisType::zaxis, velocityUnits::dps);
+    const double turn = kP_head * head - kD_head * rate;
+
+    // --- output shaping (same as original) ---
+    fwd = clampd(fwd, -maxPct, maxPct);
+
+    if (fwd != 0 && (fwd > -minPct && fwd < minPct))
+      fwd = (fwd > 0 ? minPct : -minPct);
+
+    double step = fwd - lastFwd;
+    if (step >  slewPctPer10ms) step =  slewPctPer10ms;
+    if (step < -slewPctPer10ms) step = -slewPctPer10ms;
+    fwd = lastFwd + step;
+
+    const double leftPct  = clampd(fwd + turn, -100, 100);
+    const double rightPct = clampd(fwd - turn, -100, 100);
+
+    LeftDrivetrain.spin(directionType::rev,  leftPct,  velocityUnits::pct);
+    RightDrivetrain.spin(directionType::rev, rightPct, velocityUnits::pct);
+
+    // --- settle detection (nav tolerance) ---
+    if (std::fabs(err) <= baseTolMm && std::fabs(head) <= settleTolDeg){
+      within += 10;
+      if (within >= settleTimeMs) break;
+    } else {
+      within = 0;
+    }
+
+    lastErr = err;
+    lastFwd = fwd;
+    wait(10, timeUnits::msec);
+    tMs += 10;
+  }
+
+  LeftDrivetrain.stop(brakeType::brake);
+  RightDrivetrain.stop(brakeType::brake);
+  wait(150, timeUnits::msec);
+  LeftDrivetrain.stop(coast);
+  RightDrivetrain.stop(coast);
+}
+
+// ======================================================================
+// Automatic drive distance calibration using GPS
+// ======================================================================
+//
+// Usage as 4. Auton-Programm:
+//   case 3: calibrateDriveForward(1000.0, 4); break;
+//
+// Annahme: +Y ist "vorwärts" (dy entspricht Fahrstrecke).
+//
+inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 4) {
+  Brain.Screen.clearScreen();
+  Brain.Screen.setFont(monoM);
+  Brain.Screen.setPenColor(white);
+  Brain.Screen.printAt(10, 20, false, "Drive calib start...");
+
+  double sumFactor = 0.0;
+  int validRuns = 0;
+
+  for (int i = 0; i < runs; ++i) {
+    // 1) Gyro neu auf 0°
+    ReCalibrateGyro();
+    wait(100, msec);
+
+    // 2) Startposition (GPS) aufnehmen
+    double sx = GPS.xPosition(mm);
+    double sy = GPS.yPosition(mm);
+
+    // 3) Geradeaus fahren
+    driveStraightMm_nav(testDistMm);
+    wait(200, msec);
+
+    // 4) Endposition messen
+    double ex = GPS.xPosition(mm);
+    double ey = GPS.yPosition(mm);
+
+    double dx = ex - sx;
+    double dy = ey - sy;
+
+    // Annahme: "vorwärts" ist +Y → dy ist vorwärts gefahrene Distanz
+    double traveledAlong = dy;
+
+    double factor = 1.0;
+    if (testDistMm != 0.0) {
+      factor = traveledAlong / testDistMm;
+    }
+
+    Brain.Screen.printAt(
+      10, 60 + i*20, false,
+      "Run %d: cmd=%.0fmm, act=%.0fmm, f=%.4f",
+      i+1, testDistMm, traveledAlong, factor
+    );
+
+    // Ausreißer rausfiltern (GPS-Glitch, Wandkontakt, etc.)
+    if (std::fabs(factor) < 0.5 || std::fabs(factor) > 1.5) {
+      Brain.Screen.printAt(10, 60 + i*20, false,
+                           "Run %d invalid (f=%.4f)", i+1, factor);
+    } else {
+      sumFactor += factor;
+      ++validRuns;
+    }
+
+    // 5) Zurückfahren, damit wir grob an derselben Stelle bleiben
+    driveStraightMm_nav(-testDistMm);
+    wait(300, msec);
+  }
+
+  if (validRuns == 0) {
+    Brain.Screen.printAt(10, 200, false, "No valid runs. Calib failed.");
+    return 1.0;
+  }
+
+  double avgFactor = sumFactor / validRuns;
+
+  double oldMmPerRot = g_mmPerRot;
+  g_mmPerRot = g_mmPerRot * avgFactor;
+
+  Brain.Screen.printAt(10, 220, false, "Calib done.");
+  Brain.Screen.printAt(10, 240, false,
+                       "avgF=%.4f  old=%.3f  new=%.3f",
+                       avgFactor, oldMmPerRot, g_mmPerRot);
+
+  return avgFactor;
 }

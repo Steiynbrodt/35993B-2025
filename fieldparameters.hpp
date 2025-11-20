@@ -242,26 +242,30 @@ inline void addFieldObstaclesWithSmallX(Field& field) {
     field.addEdgeMargin(100.0);
 
     // ---- Long-goal bars ----
-    field.addRectMm(0.0,  1200.0, 800.0, 200.0);   // top bar
-    field.addRectMm(0.0, -1200.0, 800.0, 200.0);   // bottom bar
+    field.addRectMm(0.0,  1200.0, 1000.0, 125.0);   // top bar
+    field.addRectMm(0.0, -1200.0, 1000.0, 125.0);   // bottom bar
 
     // ---- Corner bays ----
-    field.addRectMm(-1700.0, 0.0, 300.0, 800.0);   // left bay
-    field.addRectMm( 1700.0, 0.0, 300.0, 800.0);   // right bay
+    //field.addRectMm(-1700.0, 0.0, 300.0, 800.0);   // left bay
+   // field.addRectMm( 1700.0, 0.0, 300.0, 800.0);   // right bay
 
     // ---- Small diagonal X (±300mm) ----
-    constexpr double R = 120.0;   // disk radius in mm
+    constexpr double R = 250.0;   // disk radius in mm
 
     const double centers[][2] = {
-        {-300.0, -300.0},
-        {-300.0,  300.0},
+        //{-300.0, -300.0},
+       // {-300.0,  300.0},
         {-150.0, -150.0},
         {-150.0,  150.0},
+        {-200.0, -200.0},
+        {-200.0,  200.0},
         {   0.0,    0.0},
         { 150.0,  150.0},
         { 150.0, -150.0},
-        { 300.0,  300.0},
-        { 300.0, -300.0}
+         { 200.0,  200.0},
+        { 200.0, -200.0},
+        //{ 300.0,  300.0},
+        //{ 300.0, -300.0}
     };
 
     for (auto &c : centers)
