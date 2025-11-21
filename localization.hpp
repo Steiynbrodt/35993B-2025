@@ -6,7 +6,7 @@
 #include <queue>
 #include <vector>
 #include <utility>
-
+#include "fieldparameters.hpp" 
 // ---- Data returned for starting pose in grid space ----
 struct StartPoseCell {
     int sx{-1}, sy{-1};

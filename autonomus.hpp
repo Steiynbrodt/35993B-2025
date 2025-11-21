@@ -8,6 +8,8 @@
 #include <string>          // <- fehlte
 #include "test.hpp"
 #include "localization.hpp"
+#include "driveforward.hpp"
+#include "A_Star.hpp"
 
 // ---- Globals ----
 
@@ -143,6 +145,8 @@ void intakeoutlow(int number) {
 }
 //hard auton
 void hardcodedR(void) {
+  loadCalibration();
+
    piston1.set(true);
   piston2.set(true);
   
@@ -168,6 +172,8 @@ void hardcodedR(void) {
 
 }
 void hardcodedL(void) {
+  loadCalibration();
+
    piston1.set(true);
   piston2.set(true);
   
@@ -192,82 +198,26 @@ void hardcodedL(void) {
   intakeouthigh(30);
 
 }
-void AIMODE(void) {
-    // ---------- 1) Build field (in mm) ----------
-    // 3.6m x 3.6m field, 50mm grid cells  → 72 x 72 grid
+void AIMODE() {
+    loadCalibration();
+
+    // Build field once and keep for entire run
     Field field(3600, 3600, 50.0);
-    auto& grid = field.grid();
+    addFieldObstaclesWithSmallX(field);
 
-    // ---------- 2) Get start from GPS (on empty grid) ----------
-    // Convert GPS (mm) → start cell + heading
-    StartPoseCell sp = getStartFromGPS(field);
-    if (!sp.valid) {
-        Brain.Screen.clearScreen();
-        Brain.Screen.print("GPS start invalid");
-        return;
-    }
+    // Navigate step 1
+    navigateToGoal(field, -1275.0, -1275.0);   // Example goal
 
-    // ---------- 3) Define obstacles in mm ----------
-    // Safety band 10cm around edges
-   addFieldObstaclesWithSmallX(field);
+    // Do whatever action on arrival
+    // e.g. intake, score, wait, etc.
 
-    // Mark start cell (overwrites whatever inflation did at that cell)
-    grid.setCell(sp.sx, sp.sy, Cellstate::START);
+    // Navigate step 2
+    //navigateToGoal(field, 800.0, -400.0);
 
-    // ---------- 4) Set goal in mm ----------
-    // Example goal: somewhere in the south-west part of the field.
-    // You can change these two numbers only, everything else updates.
-    const double goalXmm = -1275.0;   // X in mm (left/right, 0 is center)
-    const double goalYmm = -1275.0;   // Y in mm (forward/back, 0 is center)
+    // Navigate step 3
+    //navigateToGoal(field, 0.0, 1200.0);
 
-    int gx = 0, gy = 0;
-    if (!field.mmToCell(goalXmm, goalYmm, gx, gy)) {
-        Brain.Screen.clearScreen();
-        Brain.Screen.print("Goal outside field");
-        return;
-    }
-    grid.setCell(gx, gy, Cellstate::GOAL);
-
-    // ---------- 5) Debug info on Brain ----------
-    Brain.Screen.clearScreen();
-    Brain.Screen.setCursor(1, 1);
-    Brain.Screen.print("S:(%d,%d) G:(%d,%d)", sp.sx, sp.sy, gx, gy);
-
-    double sXmm, sYmm, gXmm, gYmm;
-    field.cellToMmCenter(sp.sx, sp.sy, sXmm, sYmm);
-    field.cellToMmCenter(gx, gy, gXmm, gYmm);
-
-    Brain.Screen.setCursor(2, 1);
-    Brain.Screen.print("Smm:(%.0f,%.0f)", sXmm, sYmm);
-    Brain.Screen.setCursor(3, 1);
-    Brain.Screen.print("Gmm:(%.0f,%.0f)", gXmm, gYmm);
-
-    // ---------- 6) Run A* ----------
-    auto pathPairs = pathfind::astar(grid, sp.sx, sp.sy, gx, gy);
-    if (pathPairs.empty()) {
-        Brain.Screen.setCursor(4, 1);
-        Brain.Screen.print("No path");
-        return;
-    }
-
-    // Convert to CellXY for navigatePath
-    std::vector<CellXY> path;
-    path.reserve(pathPairs.size());
-    for (auto& p : pathPairs)
-        path.push_back({ p.first, p.second });
-
-    // ---------- 7) Drive the path ----------
-    navigatePath(
-        path,
-        field.cellMm(),     // cell size in mm
-        sp.headingDeg,      // starting heading from GPS
-        25.0,               // max heading step per segment (deg) – tune
-        turnStepDeg,        // your turn primitive
-        driveStraightMm     // your drive primitive
-    );
-
-    // ---------- 8) Optional: mark the path for debugging ----------
-    pathfind::paintPath(grid, pathPairs);
+    // Add as many goals as you want...
 }
 
 

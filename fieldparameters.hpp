@@ -237,6 +237,21 @@ private:
 };
 constexpr double BLOCK_RADIUS_MM = 100.0;
 
+
+inline void clearDynamicGridStates(Field& field) {
+  Grid& g = field.grid();
+  for (int y = 0; y < g.rows(); ++y) {
+    for (int x = 0; x < g.cols(); ++x) {
+      Cell& c = g.at(x, y);
+      if (c.state == Cellstate::START ||
+          c.state == Cellstate::GOAL  ||
+          c.state == Cellstate::PATH) {
+        c.state = Cellstate::FREE;
+      }
+    }
+  }
+}
+
 inline void addFieldObstaclesWithSmallX(Field& field) {
     // ---- Walls ----
     field.addEdgeMargin(100.0);

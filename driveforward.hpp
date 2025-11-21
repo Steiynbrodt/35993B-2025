@@ -9,6 +9,7 @@ using namespace vex;
 // Helpers
 // ======================================================================
 
+
 // Normalize any angle to (-180, +180] degrees.
 // Useful for heading error so the robot always turns the "short way".
 inline double wrap180(double a){
@@ -75,10 +76,37 @@ static constexpr int    settleTimeMs = 120;   // Must remain in tolerance for th
 static constexpr double PI = 3.14159265358979323846;
 
 // Laufzeit-Parameter (kalibrierbar)
-inline double g_wheelDiamMm = 61.11105;      // Startwert: gemessener Reifen-Durchmesser (mm)
-inline double g_gearRatio   = 1.6666;        // wheel rev / motor rev
+inline double g_wheelDiamMm = 82.5;      // Startwert: gemessener Reifen-Durchmesser (mm)
+inline double g_gearRatio   = 1.666;        // wheel rev / motor rev
 inline double g_mmPerRot    = PI * g_wheelDiamMm * g_gearRatio;
+inline void saveCalibration() {
+  if (!Brain.SDcard.isInserted()) {
+    Brain.Screen.printAt(10, 260, false, "No SD, calib not saved");
+    return;
+  }
 
+  char buf[64];
+  int n = snprintf(buf, sizeof(buf), "%.8f", g_mmPerRot);
+  Brain.SDcard.savefile("drive_calib.txt", (uint8_t*)buf, n);
+  Brain.Screen.printAt(10, 260, false, "Saved calib: %.3f", g_mmPerRot);
+}
+
+inline void loadCalibration() {
+  if (!Brain.SDcard.isInserted()) return;
+  if (!Brain.SDcard.exists("drive_calib.txt")) return;
+
+  uint8_t buf[64];
+  int len = Brain.SDcard.loadfile("drive_calib.txt", buf, sizeof(buf)-1);
+  if (len <= 0) return;
+  buf[len] = 0;
+
+  double v = atof((char*)buf);
+
+  if (v > 50 && v < 1000) {   // sanity check
+    g_mmPerRot = v;
+    Brain.Screen.printAt(10, 280, false, "Loaded calib: %.3f", v);
+  }
+}
 // Getter, damit alles über eine Stelle läuft
 inline double mmPerRot() { return g_mmPerRot; }
 
@@ -368,11 +396,17 @@ void driveStraightMm_nav(double distanceMm){
 //
 // Annahme: +Y ist "vorwärts" (dy entspricht Fahrstrecke).
 //
-inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 4) {
+inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 1) {
   Brain.Screen.clearScreen();
   Brain.Screen.setFont(monoM);
   Brain.Screen.setPenColor(white);
   Brain.Screen.printAt(10, 20, false, "Drive calib start...");
+
+  // Helper: clear one text line area around baseline y
+  auto clearLine = [](int y){
+    Brain.Screen.setFillColor(black);
+    Brain.Screen.drawRectangle(0, y - 18, 480, 24); // x, y, w, h
+  };
 
   double sumFactor = 0.0;
   int validRuns = 0;
@@ -383,39 +417,53 @@ inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 4) {
     wait(100, msec);
 
     // 2) Startposition (GPS) aufnehmen
-    double sx = GPS.xPosition(mm);
-    double sy = GPS.yPosition(mm);
+    double sx = GPS17.xPosition(mm);
+    double sy = GPS17.yPosition(mm);
+
+    // Robot heading (field frame) at start, 0° = +Y, CW
+    double headingDeg = GPS17.heading(degrees);      // <-- wichtig
+    double headingRad = headingDeg * M_PI / 180.0;
+
+    // Forward unit vector in field coordinates
+    double fx = std::sin(headingRad);  // +X-Komponente
+    double fy = std::cos(headingRad);  // +Y-Komponente
 
     // 3) Geradeaus fahren
     driveStraightMm_nav(testDistMm);
     wait(200, msec);
 
     // 4) Endposition messen
-    double ex = GPS.xPosition(mm);
-    double ey = GPS.yPosition(mm);
+    double ex = GPS17.xPosition(mm);
+    double ey = GPS17.yPosition(mm);
 
     double dx = ex - sx;
     double dy = ey - sy;
 
-    // Annahme: "vorwärts" ist +Y → dy ist vorwärts gefahrene Distanz
-    double traveledAlong = dy;
+    // Projektion der Bewegung auf die Vorwärtsachse des Roboters
+    double traveledAlong = dx * fx + dy * fy;   // <- echte Vorwärtsstrecke
 
     double factor = 1.0;
     if (testDistMm != 0.0) {
       factor = traveledAlong / testDistMm;
     }
 
+    bool invalid = (std::fabs(factor) < 0.5 || std::fabs(factor) > 1.5);
+
+    int lineY = 60 + i * 20;
+    clearLine(lineY);
+
+    Brain.Screen.setPenColor(white);
     Brain.Screen.printAt(
-      10, 60 + i*20, false,
-      "Run %d: cmd=%.0fmm, act=%.0fmm, f=%.4f",
-      i+1, testDistMm, traveledAlong, factor
+      10, lineY, false,
+      "Run %d: cmd=%.0fmm, act=%.0fmm, f=%.4f%s",
+      i + 1,
+      testDistMm,
+      traveledAlong,
+      factor,
+      invalid ? " (INVALID)" : ""
     );
 
-    // Ausreißer rausfiltern (GPS-Glitch, Wandkontakt, etc.)
-    if (std::fabs(factor) < 0.5 || std::fabs(factor) > 1.5) {
-      Brain.Screen.printAt(10, 60 + i*20, false,
-                           "Run %d invalid (f=%.4f)", i+1, factor);
-    } else {
+    if (!invalid) {
       sumFactor += factor;
       ++validRuns;
     }
@@ -426,6 +474,7 @@ inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 4) {
   }
 
   if (validRuns == 0) {
+    Brain.Screen.setPenColor(white);
     Brain.Screen.printAt(10, 200, false, "No valid runs. Calib failed.");
     return 1.0;
   }
@@ -441,4 +490,6 @@ inline double calibrateDriveForward(double testDistMm = 1000.0, int runs = 4) {
                        avgFactor, oldMmPerRot, g_mmPerRot);
 
   return avgFactor;
+  saveCalibration();
+
 }

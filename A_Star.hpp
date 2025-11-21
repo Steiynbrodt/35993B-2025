@@ -6,6 +6,7 @@
 #include <utility>
 #include "driveforward.hpp"
 #include "fieldparameters.hpp"
+#include "localization.hpp"
 
 
 // --- A* (Octile) on your Grid -----------------------------------------------
@@ -297,6 +298,84 @@ inline void navigatePath(const std::vector<CellXY>& path,
         i = j;
     }
 }
+
+// Navigate from current GPS position to a goal in mm.
+// Returns true if a path was found and executed.
+inline bool navigateToGoal(Field& field,
+                           double goalXmm,
+                           double goalYmm,
+                           double maxTurnStepDeg = 25.0)
+{
+  Grid& grid = field.grid();
+
+  // 1) Clear previous START/GOAL/PATH markers
+  clearDynamicGridStates(field);
+
+  // 2) Get start from GPS in this field
+  StartPoseCell sp = getStartFromGPS(field);
+  if (!sp.valid) {
+    Brain.Screen.clearScreen();
+    Brain.Screen.printAt(10, 40, false, "GPS start invalid");
+    return false;
+  }
+
+  // 3) Convert goal mm -> cell
+  int gx = 0, gy = 0;
+  if (!field.mmToCell(goalXmm, goalYmm, gx, gy)) {
+    Brain.Screen.clearScreen();
+    Brain.Screen.printAt(10, 40, false, "Goal outside field");
+    return false;
+  }
+
+  // Mark start/goal in grid
+  grid.setCell(sp.sx, sp.sy, Cellstate::START);
+  grid.setCell(gx,     gy,     Cellstate::GOAL);
+
+  // 4) Debug info
+  Brain.Screen.clearScreen();
+  Brain.Screen.setCursor(1, 1);
+  Brain.Screen.print("S:(%d,%d) G:(%d,%d)", sp.sx, sp.sy, gx, gy);
+
+  double sXmm, sYmm, gXmm, gYmm;
+  field.cellToMmCenter(sp.sx, sp.sy, sXmm, sYmm);
+  field.cellToMmCenter(gx, gy, gXmm, gYmm);
+
+  Brain.Screen.setCursor(2, 1);
+  Brain.Screen.print("Smm:(%.0f,%.0f)", sXmm, sYmm);
+  Brain.Screen.setCursor(3, 1);
+  Brain.Screen.print("Gmm:(%.0f,%.0f)", gXmm, gYmm);
+
+  // 5) Run A*
+  auto pathPairs = pathfind::astar(grid, sp.sx, sp.sy, gx, gy);
+  if (pathPairs.empty()) {
+    Brain.Screen.setCursor(4, 1);
+    Brain.Screen.print("No path");
+    return false;
+  }
+
+  // Convert to CellXY for navigatePath
+  std::vector<CellXY> path;
+  path.reserve(pathPairs.size());
+  for (auto& p : pathPairs) {
+    path.push_back({ p.first, p.second });
+  }
+
+  // 6) Drive the path
+  navigatePath(
+      path,
+      field.cellMm(),     // cell size in mm
+      sp.headingDeg,      // starting heading from GPS
+      maxTurnStepDeg,     // max heading step per segment (deg)
+      turnStepDeg,        // your turn primitive
+      driveStraightMm_nav // nav-optimised straight drive
+  );
+
+  // 7) Optional: mark the path for debugging
+  pathfind::paintPath(grid, pathPairs);
+
+  return true;
+}
+
 
 // ---------------- example wiring (replace with your robot API) ---------------
 /*
