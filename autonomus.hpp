@@ -16,7 +16,7 @@
 // --- Auton data ---
 
 static int autonMode = 0;
-static const char* AUTON_NAMES[] = { "LEFT", "RIGHT", "SKILLS", "CALIB" };
+static const char* AUTON_NAMES[] = { "SKILLS", "RIGHT","LEFT" , "CALIB" };
 static constexpr int AUTON_COUNT = sizeof(AUTON_NAMES) / sizeof(AUTON_NAMES[0]);
 
 // --- Helper to draw the menu ---
@@ -200,13 +200,28 @@ void hardcodedL(void) {
 }
 void AIMODE() {
     loadCalibration();
+    togglePiston1();
+    togglePiston2();
 
     // Build field once and keep for entire run
     Field field(3600, 3600, 50.0);
     addFieldObstaclesWithSmallX(field);
-
+    
     // Navigate step 1
-    navigateToGoal(field, -1275.0, -1275.0);   // Example goal
+   // navigateToGoal(field, -1425.0, -1425.0); 
+
+
+    navigateToGoal(field, 1125.0, -1125.0); 
+
+
+
+    navigateToGoal(field, 1125.0, 1125.0); 
+
+
+    navigateToGoal(field, -1125.0, 1125.0); 
+    
+    
+    // Example goal
 
     // Do whatever action on arrival
     // e.g. intake, score, wait, etc.
@@ -223,9 +238,10 @@ void AIMODE() {
 
 void autonomous() {
   switch (autonMode) {
-    case 0: hardcodedL();  break;
+    case 0: AIMODE();      break;
     case 1: hardcodedR();  break;
-    case 2: AIMODE();      break;
+    case 2: hardcodedL();  break;
     case 3: calibrateDriveForward(1000.0, 4); break;
   }
 }
+ 

@@ -254,31 +254,33 @@ inline void clearDynamicGridStates(Field& field) {
 
 inline void addFieldObstaclesWithSmallX(Field& field) {
     // ---- Walls ----
-    field.addEdgeMargin(100.0);
+   
 
     // ---- Long-goal bars ----
-    field.addRectMm(0.0,  1200.0, 1000.0, 125.0);   // top bar
-    field.addRectMm(0.0, -1200.0, 1000.0, 125.0);   // bottom bar
+    field.addRectMm(0.0,  1200.0,1270.0, 250.0);   // top bar
+    field.addRectMm(0.0, -1200.0, 1270.0, 250.0);   // bottom bar
+    field.addRectMm(-1500, 0.0, 300.0,300.0);
+    field.addRectMm(1500, 0.0, 300.0,300.0);
 
     // ---- Corner bays ----
     //field.addRectMm(-1700.0, 0.0, 300.0, 800.0);   // left bay
    // field.addRectMm( 1700.0, 0.0, 300.0, 800.0);   // right bay
 
     // ---- Small diagonal X (±300mm) ----
-    constexpr double R = 250.0;   // disk radius in mm
+    constexpr double R = 200.0;   // disk radius in mm
 
     const double centers[][2] = {
         //{-300.0, -300.0},
        // {-300.0,  300.0},
         {-150.0, -150.0},
         {-150.0,  150.0},
-        {-200.0, -200.0},
-        {-200.0,  200.0},
+       // {-200.0, -200.0},
+       // {-200.0,  200.0},
         {   0.0,    0.0},
         { 150.0,  150.0},
         { 150.0, -150.0},
-         { 200.0,  200.0},
-        { 200.0, -200.0},
+        // { 200.0,  200.0},
+        //{ 200.0, -200.0},
         //{ 300.0,  300.0},
         //{ 300.0, -300.0}
     };
@@ -286,6 +288,9 @@ inline void addFieldObstaclesWithSmallX(Field& field) {
     for (auto &c : centers)
         field.addDiskMm(c[0], c[1], R);
 
+
+        field.inflateByRadius(150);
     // Important:
     // DO NOT call field.inflateByRadius() when using these precise shapes!
+    
 }

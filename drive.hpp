@@ -20,7 +20,7 @@ digital_out piston3(Brain.ThreeWirePort.D);
 
 
 // State tracking (so toggles work everywhere)
-bool piston1Extended = false;
+bool piston1Extended = true;
 bool piston2Extended = false;
 bool piston3Extended = false;
 bool piston4Extended = false;
@@ -43,7 +43,11 @@ void retractPiston3() { setPiston3(false); }
 void togglePiston1() { setPiston1(!piston1Extended); }
 void togglePiston2() { setPiston2(!piston2Extended); }
 void togglePiston3() { setPiston3(!piston3Extended); }
+void toggleboth(){
+  setPiston2(!piston2Extended); 
+  setPiston1(!piston1Extended); 
 
+}
 
 motor driveMotorLeftOne = motor(PORT19, ratio18_1, false);  
 motor driveMotorLeftTwo = motor(PORT15, ratio18_1, false); 
